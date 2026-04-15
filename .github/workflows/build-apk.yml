@@ -30,14 +30,13 @@ jobs:
       - name: Configure Gradle
         run: |
           mkdir -p ~/.gradle
-          cat > ~/.gradle/gradle.properties << 'EOF'
-org.gradle.jvmargs=-Xmx4g -XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:G1ReservePercent=20
-org.gradle.parallel=true
-org.gradle.daemon=true
-android.useAndroidX=true
-android.enableJetifier=true
-android.enableR8=true
-EOF
+          cat >> ~/.gradle/gradle.properties << EOF
+          org.gradle.jvmargs=-Xmx4g -XX:+UseG1GC -XX:+ParallelRefProcEnabled
+          org.gradle.parallel=true
+          org.gradle.daemon=true
+          android.useAndroidX=true
+          android.enableJetifier=true
+          EOF
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -64,11 +63,11 @@ EOF
           echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
           ls -la $ANDROID_HOME/platforms/ 2>/dev/null | head -20 || echo "No platforms found"
           ls -la $ANDROID_HOME/build-tools/ 2>/dev/null | head -20 || echo "No build-tools found"
-          
+
           echo ""
           echo "📋 Flutter config:"
           flutter doctor -v
-          
+
           echo ""
           echo "📋 Flutter pub list:"
           flutter pub list 2>/dev/null | head -20 || echo "Could not list pub packages"
@@ -157,7 +156,7 @@ EOF
         run: |
           echo "🔎 Searching for APK files to upload..."
           APK_FILES=$(find . -name "*.apk" -type f 2>/dev/null | grep -v ".gradle" || true)
-          
+
           if [ -z "$APK_FILES" ]; then
             echo "⚠️ No APK files found!"
             echo ""
@@ -202,12 +201,12 @@ EOF
         run: |
           echo "📦 Creating GitHub Release..."
           APK_FILE=$(find . -name "*.apk" -type f 2>/dev/null | grep release | head -1)
-          
+
           if [ -z "$APK_FILE" ]; then
             echo "⚠️ No release APK found for GitHub Release"
             exit 0
           fi
-          
+
           if [ -f "$APK_FILE" ]; then
             echo "✅ Uploading $APK_FILE to GitHub Release"
             gh release create "${{ github.ref_name }}" \
