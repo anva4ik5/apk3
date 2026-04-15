@@ -24,21 +24,30 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
-          api-level: 31
-          target: android-31
+          api-level: 36
+          target: android-36
 
       - name: Configure Gradle
         run: |
           mkdir -p ~/.gradle
-          echo "org.gradle.jvmargs=-Xmx4g" > ~/.gradle/gradle.properties
+          echo "org.gradle.jvmargs=-Xmx6g -XX:+UseG1GC -XX:MaxGCPauseMillis=200" > ~/.gradle/gradle.properties
           echo "org.gradle.parallel=true" >> ~/.gradle/gradle.properties
           echo "org.gradle.daemon=true" >> ~/.gradle/gradle.properties
+          echo "org.gradle.workers.max=4" >> ~/.gradle/gradle.properties
           echo "android.useAndroidX=true" >> ~/.gradle/gradle.properties
           echo "android.enableJetifier=true" >> ~/.gradle/gradle.properties
 
       - name: Fix Gradle Wrapper
         run: |
           printf 'distributionBase=GRADLE_USER_HOME\ndistributionPath=wrapper/dists\nzipStoreBase=GRADLE_USER_HOME\nzipStorePath=wrapper/dists\ndistributionUrl=https\\://services.gradle.org/distributions/gradle-8.11.1-bin.zip\n' > android/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Install Android SDKs and Tools
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platforms;android-34"
+          sdkmanager "platforms;android-36"
+          sdkmanager "build-tools;34.0.0"
+          sdkmanager "build-tools;36.0.0"
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
