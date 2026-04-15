@@ -26,7 +26,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final _ctrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   final List<Message> _messages = [];
-  final _record = Record();
+  final _record = AudioRecorder();
   Chat? _chat;
   User? _me;
   bool _loading = true;
