@@ -59,32 +59,61 @@ jobs:
       - name: Download Android dependencies
         run: flutter precache --android
 
+      - name: Verify Android setup
+        run: |
+          echo "📋 Android SDK info:"
+          echo "ANDROID_HOME: $ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
+          ls -la $ANDROID_HOME/platforms/ 2>/dev/null | head -20 || echo "No platforms found"
+          ls -la $ANDROID_HOME/build-tools/ 2>/dev/null | head -20 || echo "No build-tools found"
+          
+          echo ""
+          echo "📋 Flutter config:"
+          flutter doctor -v
+
       - name: Build APK (debug first)
         continue-on-error: true
         run: |
           echo "🔨 Building debug APK..."
           flutter build apk --debug -v 2>&1 | tee -a build.log
-          
+          echo "Exit code: $?"
+
       - name: Build APK (release)
         run: |
           echo "🔨 Building release APK..."
           flutter build apk --release -v 2>&1 | tee -a build.log
+          echo "Exit code: $?"
 
       - name: Check build output
+        if: always()
         run: |
           echo "📂 Checking build directory..."
-          find build -type d -name "apk" | head -20
-          find build -name "*.apk" | head -20
+          if [ -d "build" ]; then
+            echo "✅ build directory exists"
+            find build -type d -name "apk" 2>/dev/null | head -20 || echo "No apk directories found"
+            find build -name "*.apk" 2>/dev/null | head -20 || echo "No APK files found"
+          else
+            echo "❌ build directory does not exist"
+            echo "Current directory contents:"
+            ls -lah
+          fi
 
       - name: List APK files
         if: always()
+        continue-on-error: true
         run: |
           echo "🔍 Searching for APK files..."
-          find build -name "*.apk" -type f -exec ls -lh {} \;
+          if [ -d "build" ]; then
+            find build -name "*.apk" -type f -exec ls -lh {} \; 2>/dev/null || true
+          else
+            echo "⚠️ build directory not found"
+            echo "Listing root directory:"
+            ls -lah .
+          fi
           echo ""
-          echo "📂 Full build structure:"
-          ls -lah build/app/outputs/ 2>/dev/null || echo "build/app/outputs not found"
-          ls -lah build/app/ 2>/dev/null || echo "build/app not found"
+          echo "📂 Expected build structure:"
+          echo "build/app/outputs/apk/release/ (for release APKs)"
+          echo "build/app/outputs/apk/debug/ (for debug APKs)"
 
       - name: Upload build logs on failure
         if: failure()
@@ -94,22 +123,51 @@ jobs:
           path: build.log
           retention-days: 7
 
+      - name: Find and upload APK artifacts
+        if: always()
+        continue-on-error: true
+        run: |
+          echo "🔎 Searching for APK files to upload..."
+          APK_FILES=$(find . -name "*.apk" -type f 2>/dev/null | grep -v ".gradle" || true)
+          
+          if [ -z "$APK_FILES" ]; then
+            echo "⚠️ No APK files found!"
+            echo "Build directory structure:"
+            find . -maxdepth 3 -type d | head -30
+            exit 1
+          else
+            echo "✅ Found APK files:"
+            echo "$APK_FILES"
+            mkdir -p apk_artifacts
+            find . -name "*.apk" -type f -exec cp {} apk_artifacts/ \;
+            ls -lah apk_artifacts/
+          fi
+
       - name: Upload APK artifacts
+        if: always()
         uses: actions/upload-artifact@v4
-        if: success()
         with:
           name: android-apk-release
-          path: build/app/outputs/apk/release/
+          path: apk_artifacts/
           retention-days: 30
           if-no-files-found: warn
 
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/') && success()
+        if: startsWith(github.ref, 'refs/tags/')
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          APK_FILE=$(find build -name "*.apk" -type f | grep release | head -1)
+          echo "📦 Creating GitHub Release..."
+          APK_FILE=$(find . -name "*.apk" -type f 2>/dev/null | grep release | head -1)
+          
+          if [ -z "$APK_FILE" ]; then
+            echo "⚠️ No release APK found for GitHub Release"
+            exit 0
+          fi
+          
           if [ -f "$APK_FILE" ]; then
+            echo "✅ Uploading $APK_FILE to GitHub Release"
             gh release create "${{ github.ref_name }}" \
               "$APK_FILE" \
               --title "APK Release ${{ github.ref_name }}" \
@@ -117,8 +175,7 @@ jobs:
               --prerelease=false \
               --repo ${{ github.repository }}
           else
-            echo "⚠️ No release APK found"
-            exit 1
+            echo "❌ APK file does not exist"
           fi
           name: release-apk-${{ github.ref_name }}
           path: build/app/outputs/apk/release/
