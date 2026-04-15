@@ -30,13 +30,11 @@ jobs:
       - name: Configure Gradle
         run: |
           mkdir -p ~/.gradle
-          cat >> ~/.gradle/gradle.properties << EOF
-          org.gradle.jvmargs=-Xmx4g -XX:+UseG1GC -XX:+ParallelRefProcEnabled
-          org.gradle.parallel=true
-          org.gradle.daemon=true
-          android.useAndroidX=true
-          android.enableJetifier=true
-          EOF
+          printf 'org.gradle.jvmargs=-Xmx4g -XX:+UseG1GC -XX:+ParallelRefProcEnabled\norg.gradle.parallel=true\norg.gradle.daemon=true\nandroid.useAndroidX=true\nandroid.enableJetifier=true\n' > ~/.gradle/gradle.properties
+
+      - name: Fix Gradle Wrapper
+        run: |
+          printf 'distributionBase=GRADLE_USER_HOME\ndistributionPath=wrapper/dists\nzipStoreBase=GRADLE_USER_HOME\nzipStorePath=wrapper/dists\ndistributionUrl=https\\://services.gradle.org/distributions/gradle-8.11.1-bin.zip\n' > android/gradle/wrapper/gradle-wrapper.properties
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -63,14 +61,9 @@ jobs:
           echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
           ls -la $ANDROID_HOME/platforms/ 2>/dev/null | head -20 || echo "No platforms found"
           ls -la $ANDROID_HOME/build-tools/ 2>/dev/null | head -20 || echo "No build-tools found"
-
           echo ""
           echo "📋 Flutter config:"
           flutter doctor -v
-
-          echo ""
-          echo "📋 Flutter pub list:"
-          flutter pub list 2>/dev/null | head -20 || echo "Could not list pub packages"
 
       - name: Clean Flutter build cache
         run: |
@@ -87,9 +80,6 @@ jobs:
           flutter build apk --debug -v 2>&1 | tee build_debug.log
           EXIT_CODE=${PIPESTATUS[0]}
           echo "Debug build exit code: $EXIT_CODE"
-          if [ $EXIT_CODE -ne 0 ]; then
-            echo "❌ Debug build failed, but continuing..."
-          fi
 
       - name: Build APK (release)
         run: |
@@ -97,13 +87,10 @@ jobs:
           set -e
           flutter build apk --release -v 2>&1 | tee build_release.log
           EXIT_CODE=${PIPESTATUS[0]}
-          echo "Release build exit code: $EXIT_CODE"
           if [ $EXIT_CODE -eq 0 ]; then
             echo "✅ Release APK build successful"
           else
             echo "❌ Release APK build failed!"
-            echo ""
-            echo "=== BUILD_RELEASE.LOG CONTENT ==="
             cat build_release.log
             exit 1
           fi
@@ -113,32 +100,16 @@ jobs:
         run: |
           echo "📂 Checking build directory..."
           if [ -d "build" ]; then
-            echo "✅ build directory exists"
-            echo ""
-            echo "📋 Build directory contents:"
             find build -type f -name "*.apk" 2>/dev/null || echo "No APK files in build/"
-            echo ""
-            echo "📋 Full build tree:"
-            find build -type d | head -30
           else
             echo "❌ build directory NOT created"
-            ls -lah
           fi
 
       - name: Display build logs
         if: always()
         run: |
-          echo "📋 Displaying build logs..."
-          if [ -f build_debug.log ]; then
-            echo "=== DEBUG BUILD LOG ==="
-            tail -100 build_debug.log
-            echo ""
-          fi
-          if [ -f build_release.log ]; then
-            echo "=== RELEASE BUILD LOG ==="
-            tail -100 build_release.log
-            echo ""
-          fi
+          [ -f build_debug.log ] && tail -100 build_debug.log || true
+          [ -f build_release.log ] && tail -100 build_release.log || true
 
       - name: Upload build logs on failure
         if: failure()
@@ -154,33 +125,13 @@ jobs:
         if: always()
         continue-on-error: true
         run: |
-          echo "🔎 Searching for APK files to upload..."
           APK_FILES=$(find . -name "*.apk" -type f 2>/dev/null | grep -v ".gradle" || true)
-
           if [ -z "$APK_FILES" ]; then
             echo "⚠️ No APK files found!"
-            echo ""
-            echo "=== ATTEMPTING TO DIAGNOSE ==="
-            if [ -f build_release.log ]; then
-              echo "Last 50 lines of release build log:"
-              tail -50 build_release.log
-            fi
-            if [ -f build_debug.log ]; then
-              echo ""
-              echo "Last 50 lines of debug build log:"
-              tail -50 build_debug.log
-            fi
-            echo ""
-            echo "Flutter doctor output:"
-            flutter doctor -v
             exit 1
           else
-            echo "✅ Found APK files:"
-            echo "$APK_FILES"
             mkdir -p apk_artifacts
             find . -name "*.apk" -type f -exec cp {} apk_artifacts/ \;
-            echo ""
-            echo "📦 Copied APKs:"
             ls -lah apk_artifacts/
           fi
 
@@ -199,16 +150,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "📦 Creating GitHub Release..."
           APK_FILE=$(find . -name "*.apk" -type f 2>/dev/null | grep release | head -1)
-
-          if [ -z "$APK_FILE" ]; then
-            echo "⚠️ No release APK found for GitHub Release"
-            exit 0
-          fi
-
-          if [ -f "$APK_FILE" ]; then
-            echo "✅ Uploading $APK_FILE to GitHub Release"
+          if [ -n "$APK_FILE" ] && [ -f "$APK_FILE" ]; then
             gh release create "${{ github.ref_name }}" \
               "$APK_FILE" \
               --title "APK Release ${{ github.ref_name }}" \
@@ -216,5 +159,5 @@ jobs:
               --prerelease=false \
               --repo ${{ github.repository }}
           else
-            echo "❌ APK file does not exist"
+            echo "⚠️ No release APK found"
           fi
