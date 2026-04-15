@@ -30,7 +30,11 @@ jobs:
       - name: Configure Gradle
         run: |
           mkdir -p ~/.gradle
-          printf 'org.gradle.jvmargs=-Xmx4g -XX:+UseG1GC -XX:+ParallelRefProcEnabled\norg.gradle.parallel=true\norg.gradle.daemon=true\nandroid.useAndroidX=true\nandroid.enableJetifier=true\n' > ~/.gradle/gradle.properties
+          echo "org.gradle.jvmargs=-Xmx4g" > ~/.gradle/gradle.properties
+          echo "org.gradle.parallel=true" >> ~/.gradle/gradle.properties
+          echo "org.gradle.daemon=true" >> ~/.gradle/gradle.properties
+          echo "android.useAndroidX=true" >> ~/.gradle/gradle.properties
+          echo "android.enableJetifier=true" >> ~/.gradle/gradle.properties
 
       - name: Fix Gradle Wrapper
         run: |
@@ -39,7 +43,6 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.32.7'
           channel: 'stable'
           cache: true
 
