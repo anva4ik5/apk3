@@ -30,16 +30,14 @@ jobs:
       - name: Configure Gradle
         run: |
           mkdir -p ~/.gradle
-          cat >> ~/.gradle/gradle.properties << EOF
-          org.gradle.jvmargs=-Xmx4g -XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:+UnlockExperimentalVMOptions -XX:G1NewCollectionPercentage=30 -XX:G1ReservePercent=20
-          org.gradle.parallel=true
-          org.gradle.daemon=true
-          android.useAndroidX=true
-          android.enableJetifier=true
-          android.enableD8=true
-          android.enableR8=true
-          android.enableDesugaring=true
-          EOF
+          cat > ~/.gradle/gradle.properties << 'EOF'
+org.gradle.jvmargs=-Xmx4g -XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:G1ReservePercent=20
+org.gradle.parallel=true
+org.gradle.daemon=true
+android.useAndroidX=true
+android.enableJetifier=true
+android.enableR8=true
+EOF
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -221,5 +219,3 @@ jobs:
           else
             echo "❌ APK file does not exist"
           fi
-          name: release-apk-${{ github.ref_name }}
-          path: build/app/outputs/apk/release/
