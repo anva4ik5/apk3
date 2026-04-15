@@ -38,7 +38,7 @@ class _EmailScreenState extends State<EmailScreen> with SingleTickerProviderStat
 
   Future<void> _send() async {
     if (!_identifierValid) {
-      setState(() => _error = 'Введите корректный email';
+      setState(() => _error = 'Введите корректный email');
       return;
     }
     setState(() { _loading = true; _error = null; });
