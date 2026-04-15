@@ -21,47 +21,94 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: 31
+          target: android-31
+
+      - name: Configure Gradle
+        run: |
+          mkdir -p ~/.gradle
+          cat >> ~/.gradle/gradle.properties << EOF
+          org.gradle.jvmargs=-Xmx4g -XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:+UnlockExperimentalVMOptions -XX:G1NewCollectionPercentage=30 -XX:G1ReservePercent=20
+          org.gradle.parallel=true
+          org.gradle.daemon=true
+          android.useAndroidX=true
+          android.enableJetifier=true
+          android.enableD8=true
+          android.enableR8=true
+          android.enableDesugaring=true
+          EOF
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
           cache: true
 
-      - name: Verify Flutter installation
+      - name: Flutter environment
         run: |
           flutter --version
           flutter doctor -v
           flutter config --enable-android
 
-      - name: Get Flutter dependencies
+      - name: Get dependencies
         run: flutter pub get
 
-      - name: Build Android APK (Release - Split Per ABI)
-        run: flutter build apk --release --split-per-abi -v
+      - name: Download Android dependencies
+        run: flutter precache --android
 
-      - name: Build Android APK (Universal)
-        run: flutter build apk --release -v
-
-      - name: Verify APK files
+      - name: Build APK (debug first)
+        continue-on-error: true
         run: |
-          ls -lah build/app/outputs/apk/release/
-          find build/app/outputs/apk/release -name "*.apk" -type f
+          echo "🔨 Building debug APK..."
+          flutter build apk --debug -v 2>&1 | tee -a build.log
+          
+      - name: Build APK (release)
+        run: |
+          echo "🔨 Building release APK..."
+          flutter build apk --release -v 2>&1 | tee -a build.log
+
+      - name: Check build output
+        run: |
+          echo "📂 Checking build directory..."
+          find build -type d -name "apk" | head -20
+          find build -name "*.apk" | head -20
+
+      - name: List APK files
+        if: always()
+        run: |
+          echo "🔍 Searching for APK files..."
+          find build -name "*.apk" -type f -exec ls -lh {} \;
+          echo ""
+          echo "📂 Full build structure:"
+          ls -lah build/app/outputs/ 2>/dev/null || echo "build/app/outputs not found"
+          ls -lah build/app/ 2>/dev/null || echo "build/app not found"
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: build.log
+          retention-days: 7
 
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         if: success()
         with:
           name: android-apk-release
-          path: build/app/outputs/apk/release/*.apk
+          path: build/app/outputs/apk/release/
           retention-days: 30
           if-no-files-found: warn
 
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') && success()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          APK_FILE=$(find build/app/outputs/apk/release -name "*.apk" -type f | head -1)
+          APK_FILE=$(find build -name "*.apk" -type f | grep release | head -1)
           if [ -f "$APK_FILE" ]; then
             gh release create "${{ github.ref_name }}" \
               "$APK_FILE" \
@@ -70,13 +117,8 @@ jobs:
               --prerelease=false \
               --repo ${{ github.repository }}
           else
-            echo "APK file not found!"
+            echo "⚠️ No release APK found"
             exit 1
           fi
-
-      - name: Upload to Artifact Hub (optional)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/upload-artifact@v4
-        with:
           name: release-apk-${{ github.ref_name }}
           path: build/app/outputs/apk/release/
