@@ -1,0 +1,1191 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
+import 'package:timeago/timeago.dart' as timeago;
+import 'package:audioplayers/audioplayers.dart';
+import 'package:http/http.dart' as http;
+import 'package:record/record.dart';
+import '../../models/chat.dart';
+import '../../models/user.dart';
+import '../../services/api.dart';
+import '../../services/ws.dart';
+import '../../theme.dart';
+import '../../widgets/avatar.dart';
+
+class ChatScreen extends StatefulWidget {
+  final String chatId;
+  const ChatScreen({super.key, required this.chatId});
+  @override
+  State<ChatScreen> createState() => _ChatScreenState();
+}
+
+class _ChatScreenState extends State<ChatScreen> {
+  final _ctrl = TextEditingController();
+  final _scrollCtrl = ScrollController();
+  final List<Message> _messages = [];
+  final _record = Record();
+  Chat? _chat;
+  User? _me;
+  bool _loading = true;
+  bool _loadingMore = false;
+  bool _sending = false;
+  bool _isRecording = false;
+  String? _typing;
+  Timer? _typingTimer;
+  StreamSubscription? _wsSub;
+  Message? _replyTo;
+  Message? _editingMessage;
+  bool _showEmojiPicker = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+    _scrollCtrl.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    wsService.leaveChat(widget.chatId);
+    _wsSub?.cancel();
+    _ctrl.dispose();
+    _scrollCtrl.dispose();
+    _typingTimer?.cancel();
+    _record.dispose();
+    super.dispose();
+  }
+
+  Future<void> _startRecording() async {
+    try {
+      if (await _record.hasPermission()) {
+        final path = '${Directory.systemTemp.path}/audio_${DateTime.now().millisecondsSinceEpoch}.m4a';
+        await _record.start(const RecordConfig(), path: path);
+        setState(() => _isRecording = true);
+      }
+    } catch (e) {
+      // error
+    }
+  }
+
+  Future<void> _stopRecording() async {
+    try {
+      final path = await _record.stop();
+      setState(() => _isRecording = false);
+      if (path != null) {
+        await _sendVoiceMessage(path);
+      }
+    } catch (e) {
+      // error
+    }
+  }
+
+  Future<void> _sendVoiceMessage(String path) async {
+    final token = await ApiService.getToken();
+    final request = http.MultipartRequest('POST', Uri.parse('${ApiService.baseUrl}/api/upload'));
+    if (token != null) request.headers['Authorization'] = 'Bearer $token';
+    request.files.add(await http.MultipartFile.fromPath('file', path));
+    final response = await request.send();
+    if (response.statusCode == 200) {
+      final resp = await response.stream.bytesToString();
+      final data = jsonDecode(resp);
+      final mediaUrl = data['url'];
+      wsService.sendMessage(widget.chatId, '', type: 'voice', mediaUrl: mediaUrl);
+    }
+  }
+
+  Future<void> _init() async {
+    try {
+      final meData = await ApiService.getMe();
+      _me = User.fromJson(meData);
+
+      final chatData = await ApiService.getChatInfo(widget.chatId);
+      _chat = Chat.fromJson(chatData);
+
+      final msgs = await ApiService.getMessages(widget.chatId);
+      if (!mounted) return;
+      setState(() {
+        _messages.clear();
+        _messages.addAll(msgs.map((j) => Message.fromJson(j as Map<String, dynamic>)));
+        _loading = false;
+      });
+
+      wsService.joinChat(widget.chatId);
+      wsService.markRead(widget.chatId);
+      _wsSub = wsService.chatStream(widget.chatId).listen(_onWsMsg);
+      _scrollToBottom();
+    } catch (e) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _onScroll() {
+    if (_scrollCtrl.position.pixels <= 100 && !_loadingMore && _messages.isNotEmpty) {
+      _loadMore();
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (_loadingMore) return;
+    setState(() => _loadingMore = true);
+    try {
+      final oldest = _messages.first.createdAt.toIso8601String();
+      final older = await ApiService.getMessages(widget.chatId, before: oldest);
+      if (!mounted) return;
+      if (older.isNotEmpty) {
+        final oldScroll = _scrollCtrl.position.pixels;
+        setState(() {
+          _messages.insertAll(0, older.map((j) => Message.fromJson(j as Map<String, dynamic>)));
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_scrollCtrl.hasClients) {
+            _scrollCtrl.jumpTo(_scrollCtrl.position.pixels + (older.length * 72.0));
+          }
+        });
+      }
+    } catch (_) {} finally {
+      if (mounted) setState(() => _loadingMore = false);
+    }
+  }
+
+  void _onWsMsg(Map<String, dynamic> msg) {
+    if (!mounted) return;
+    final type = msg['type'];
+
+    switch (type) {
+      case 'new_message':
+        final m = Message.fromJson(msg['message'] as Map<String, dynamic>);
+        setState(() => _messages.add(m));
+        wsService.markRead(widget.chatId);
+        _scrollToBottom();
+        break;
+
+      case 'typing':
+        final uid = msg['userId'] as String?;
+        if (uid != _me?.id) {
+          final displayName = msg['displayName'] as String? ?? uid ?? 'Кто-то';
+          final isTyping = msg['isTyping'] as bool? ?? false;
+          setState(() => _typing = isTyping ? displayName : null);
+        }
+        break;
+
+      case 'message_deleted':
+        final mid = msg['messageId'] as String;
+        setState(() => _messages.removeWhere((m) => m.id == mid));
+        break;
+
+      case 'message_edited':
+        final edited = Message.fromJson(msg['message'] as Map<String, dynamic>);
+        setState(() {
+          final idx = _messages.indexWhere((m) => m.id == edited.id);
+          if (idx >= 0) _messages[idx] = edited;
+        });
+        break;
+
+      case 'reaction_updated':
+        final mid = msg['messageId'] as String;
+        final rawReactions = msg['reactions'] as List?;
+        final reactions = rawReactions?.map((r) => Reaction.fromJson(r as Map<String, dynamic>)).toList() ?? [];
+        setState(() {
+          final idx = _messages.indexWhere((m) => m.id == mid);
+          if (idx >= 0) _messages[idx] = _messages[idx].copyWith(reactions: reactions);
+        });
+        break;
+
+      case 'message_pinned':
+        final mid = msg['messageId'] as String;
+        final isPinned = msg['isPinned'] as bool? ?? false;
+        setState(() {
+          final idx = _messages.indexWhere((m) => m.id == mid);
+          if (idx >= 0) _messages[idx] = _messages[idx].copyWith(isPinned: isPinned);
+        });
+        break;
+
+      case 'user_status':
+        if (msg['userId'] == _chat?.otherUserId) {
+          setState(() { _chat = _chat?.copyWith(otherUserOnline: msg['isOnline']); });
+        }
+        break;
+    }
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollCtrl.hasClients) {
+        _scrollCtrl.animateTo(
+          _scrollCtrl.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  void _onTyping(String value) {
+    setState(() {
+      wsService.sendTyping(widget.chatId, value.isNotEmpty);
+      _typingTimer?.cancel();
+      if (value.isNotEmpty) {
+        _typingTimer = Timer(const Duration(seconds: 3), () {
+          wsService.sendTyping(widget.chatId, false);
+        });
+      }
+    });
+  }
+
+  Future<void> _send() async {
+    final text = _ctrl.text.trim();
+    if (text.isEmpty || _sending) return;
+
+    setState(() => _sending = true);
+    _ctrl.clear();
+    wsService.sendTyping(widget.chatId, false);
+
+    if (_editingMessage != null) {
+      wsService.editMessage(widget.chatId, _editingMessage!.id, text);
+      setState(() { _editingMessage = null; _replyTo = null; });
+    } else {
+      wsService.sendMessage(
+        widget.chatId,
+        text,
+        replyTo: _replyTo?.id,
+        forwardFromUser: _replyTo?.forwardFromUser,
+      );
+      setState(() => _replyTo = null);
+    }
+
+    setState(() => _sending = false);
+  }
+
+  void _deleteMessage(Message msg) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppColors.bg3,
+        title: const Text('Удалить сообщение?', style: TextStyle(color: AppColors.textPrimary)),
+        content: const Text('Это действие нельзя отменить.', style: TextStyle(color: AppColors.textSecondary)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Отмена')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Удалить', style: TextStyle(color: AppColors.red))),
+        ],
+      ),
+    );
+    if (confirm == true) wsService.deleteMessage(widget.chatId, msg.id);
+  }
+
+  void _showReactionPicker(Message msg) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.bg2,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => Column(
+        children: [
+          const SizedBox(height: 12),
+          const Text('Реакция', style: TextStyle(color: AppColors.textSecondary, fontSize: 14)),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: ['👍', '❤️', '😂', '😮', '😢', '🔥', '👏', '🎉'].map((e) =>
+                GestureDetector(
+                  onTap: () {
+                    Navigator.pop(context);
+                    wsService.reactToMessage(widget.chatId, msg.id, e);
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Text(e, style: const TextStyle(fontSize: 30)),
+                  ),
+                ),
+              ).toList(),
+            ),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 250,
+            child: EmojiPicker(
+              onEmojiSelected: (_, emoji) {
+                Navigator.pop(context);
+                wsService.reactToMessage(widget.chatId, msg.id, emoji.emoji);
+              },
+              config: const Config(
+                emojiViewConfig: EmojiViewConfig(backgroundColor: Colors.transparent),
+                categoryViewConfig: CategoryViewConfig(backgroundColor: AppColors.bg2),
+                searchViewConfig: SearchViewConfig(backgroundColor: AppColors.bg3),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showUserProfile(String userId) async {
+    try {
+      final data = await ApiService.getUserProfile(userId);
+      if (!mounted) return;
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: AppColors.bg2,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+        builder: (_) => Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(width: 36, height: 4, decoration: BoxDecoration(color: AppColors.textMuted.withOpacity(0.4), borderRadius: BorderRadius.circular(2))),
+              const SizedBox(height: 20),
+              AppAvatar(name: data['display_name'] ?? data['username'], url: data['avatar_url'], size: 80),
+              const SizedBox(height: 12),
+              Text(data['display_name'] ?? data['username'], style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+              const SizedBox(height: 4),
+              Text('@${data['username']}', style: const TextStyle(color: AppColors.primary, fontSize: 14)),
+              if (data['bio'] != null && (data['bio'] as String).isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text(data['bio'], style: const TextStyle(color: AppColors.textSecondary, fontSize: 14), textAlign: TextAlign.center),
+              ],
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    (data['is_online'] as bool? ?? false) ? Icons.circle : Icons.circle_outlined,
+                    size: 10,
+                    color: (data['is_online'] as bool? ?? false) ? AppColors.green : AppColors.textMuted,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    (data['is_online'] as bool? ?? false) ? 'В сети' : 'Не в сети',
+                    style: TextStyle(color: (data['is_online'] as bool? ?? false) ? AppColors.green : AppColors.textMuted, fontSize: 13),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+            ],
+          ),
+        ),
+      );
+    } catch (_) {}
+  }
+
+  void _showGroupInfo() async {
+    try {
+      final members = await ApiService.getChatMembers(widget.chatId);
+      if (!mounted) return;
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: AppColors.bg2,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+        isScrollControlled: true,
+        builder: (_) => DraggableScrollableSheet(
+          initialChildSize: 0.6,
+          maxChildSize: 0.9,
+          minChildSize: 0.4,
+          expand: false,
+          builder: (_, ctrl) => Column(
+            children: [
+              const SizedBox(height: 12),
+              Container(width: 36, height: 4, decoration: BoxDecoration(color: AppColors.textMuted.withOpacity(0.4), borderRadius: BorderRadius.circular(2))),
+              const SizedBox(height: 16),
+              AppAvatar(name: _chat!.displayName, url: _chat!.displayAvatar, size: 64),
+              const SizedBox(height: 8),
+              Text(_chat!.displayName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+              const SizedBox(height: 4),
+              Text('${members.length} участников', style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+              const SizedBox(height: 12),
+              const Divider(color: AppColors.divider),
+              Expanded(
+                child: ListView.builder(
+                  controller: ctrl,
+                  itemCount: members.length,
+                  itemBuilder: (_, i) {
+                    final m = members[i];
+                    return ListTile(
+                      leading: AppAvatar(name: m['display_name'] ?? m['username'], url: m['avatar_url'], size: 40, showOnline: true, isOnline: m['is_online'] ?? false),
+                      title: Text(m['display_name'] ?? m['username'], style: const TextStyle(color: AppColors.textPrimary)),
+                      subtitle: Text('@${m['username']}', style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                      trailing: m['role'] == 'owner'
+                          ? const Icon(Icons.star, color: AppColors.yellow, size: 16)
+                          : m['role'] == 'admin'
+                              ? const Icon(Icons.shield, color: AppColors.primary, size: 16)
+                              : null,
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    } catch (_) {}
+  }
+
+  void _forwardMessage(Message msg) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.bg2,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      isScrollControlled: true,
+      builder: (_) => _ForwardSheet(
+        message: msg,
+        senderName: msg.senderName,
+        onForward: (targetChatId) async {
+          Navigator.pop(context);
+          wsService.sendMessage(
+            targetChatId,
+            msg.content,
+            forwardFromUser: msg.senderName,
+          );
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Сообщение переслано'), backgroundColor: AppColors.bg3, behavior: SnackBarBehavior.floating),
+          );
+        },
+      ),
+    );
+  }
+
+  void _showMessageOptions(Message msg) {
+    final isOwn = msg.senderId == _me?.id;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.bg2,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _OptionTile(icon: Icons.emoji_emotions_outlined, label: 'Реакция', onTap: () { Navigator.pop(context); _showReactionPicker(msg); }),
+            _OptionTile(icon: Icons.reply_rounded, label: 'Ответить', onTap: () { Navigator.pop(context); setState(() => _replyTo = msg); }),
+            _OptionTile(icon: Icons.forward_rounded, label: 'Переслать', onTap: () { Navigator.pop(context); _forwardMessage(msg); }),
+            _OptionTile(icon: Icons.copy_rounded, label: 'Копировать', onTap: () { Navigator.pop(context); Clipboard.setData(ClipboardData(text: msg.content)); }),
+            if (isOwn) _OptionTile(icon: Icons.edit_outlined, label: 'Редактировать', onTap: () {
+              Navigator.pop(context);
+              setState(() { _editingMessage = msg; _ctrl.text = msg.content; });
+              _ctrl.selection = TextSelection.fromPosition(TextPosition(offset: _ctrl.text.length));
+            }),
+            _OptionTile(icon: Icons.push_pin_outlined, label: msg.isPinned ? 'Открепить' : 'Закрепить', onTap: () async {
+              Navigator.pop(context);
+              await ApiService.pinMessage(widget.chatId, msg.id);
+            }),
+            if (isOwn) _OptionTile(icon: Icons.delete_outline, label: 'Удалить', color: AppColors.red, onTap: () { Navigator.pop(context); _deleteMessage(msg); }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isGroup = _chat?.type == 'group';
+
+    return Scaffold(
+      backgroundColor: AppColors.bg1,
+      appBar: AppBar(
+        titleSpacing: 0,
+        leading: const BackButton(),
+        title: _chat == null
+            ? const SizedBox.shrink()
+            : InkWell(
+                onTap: () {
+                  if (_chat!.type == 'group') {
+                    _showGroupInfo();
+                  } else if (_chat!.otherUserId != null) {
+                    _showUserProfile(_chat!.otherUserId!);
+                  }
+                },
+                child: Row(
+                  children: [
+                    AppAvatar(
+                      name: _chat!.displayName,
+                      url: _chat!.displayAvatar,
+                      size: 38,
+                      showOnline: !isGroup,
+                      isOnline: _chat?.otherUserOnline ?? false,
+                    ),
+                    const SizedBox(width: 10),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(_chat!.displayName, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                        if (_typing != null)
+                          Text('$_typing печатает...', style: const TextStyle(color: AppColors.primary, fontSize: 12))
+                        else if (!isGroup)
+                          Text(
+                            (_chat?.otherUserOnline ?? false) ? 'В сети' : 'Не в сети',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: (_chat?.otherUserOnline ?? false) ? AppColors.green : AppColors.textMuted,
+                            ),
+                          )
+                        else
+                          const Text('Группа', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+        actions: [
+          PopupMenuButton<String>(
+            color: AppColors.bg3,
+            icon: const Icon(Icons.more_vert, color: AppColors.primary),
+            onSelected: (v) async {
+              if (v == 'summarize') {
+                final summary = await ApiService.summarizeChat(widget.chatId);
+                if (!mounted) return;
+                showDialog(
+                  context: context,
+                  builder: (_) => AlertDialog(
+                    backgroundColor: AppColors.bg3,
+                    title: const Text('Резюме чата', style: TextStyle(color: AppColors.textPrimary)),
+                    content: Text(summary, style: const TextStyle(color: AppColors.textSecondary)),
+                    actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('ОК'))],
+                  ),
+                );
+              } else if (v == 'mute') {
+                final result = await ApiService.toggleMuteChat(widget.chatId);
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(result['isMuted'] ? 'Уведомления отключены' : 'Уведомления включены'), backgroundColor: AppColors.bg3),
+                );
+              }
+            },
+            itemBuilder: (_) => [
+              const PopupMenuItem(value: 'summarize', child: ListTile(leading: Icon(Icons.auto_awesome, color: AppColors.primary), title: Text('AI-резюме', style: TextStyle(color: AppColors.textPrimary)))),
+              const PopupMenuItem(value: 'mute', child: ListTile(leading: Icon(Icons.volume_off_outlined, color: AppColors.textSecondary), title: Text('Отключить звук', style: TextStyle(color: AppColors.textPrimary)))),
+            ],
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          // Pinned message
+          if (_messages.any((m) => m.isPinned))
+            _PinnedBanner(message: _messages.lastWhere((m) => m.isPinned)),
+          // Messages
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+                : ListView.builder(
+                    controller: _scrollCtrl,
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                    itemCount: _messages.length + (_loadingMore ? 1 : 0),
+                    itemBuilder: (_, i) {
+                      if (_loadingMore && i == 0) {
+                        return const Center(child: Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2)));
+                      }
+                      final idx = _loadingMore ? i - 1 : i;
+                      final msg = _messages[idx];
+                      return _MessageBubble(
+                        message: msg,
+                        isOwn: msg.senderId == _me?.id,
+                        isGroup: isGroup,
+                        onLongPress: () => _showMessageOptions(msg),
+                        onReply: () => setState(() => _replyTo = msg),
+                        currentUserId: _me?.id ?? '',
+                      );
+                    },
+                  ),
+          ),
+          // Reply / Edit bar
+          if (_replyTo != null || _editingMessage != null)
+            _ReplyBar(
+              replyTo: _replyTo,
+              editing: _editingMessage,
+              onCancel: () => setState(() { _replyTo = null; _editingMessage = null; _ctrl.clear(); }),
+            ),
+          // Input bar
+          _InputBar(
+            controller: _ctrl,
+            sending: _sending,
+            isRecording: _isRecording,
+            onTyping: _onTyping,
+            onSend: _send,
+            onEmojiToggle: () => setState(() => _showEmojiPicker = !_showEmojiPicker),
+            onRecordStart: _startRecording,
+            onRecordStop: _stopRecording,
+          ),
+          if (_showEmojiPicker)
+            SizedBox(
+              height: 280,
+              child: EmojiPicker(
+                textEditingController: _ctrl,
+                config: const Config(
+                  emojiViewConfig: EmojiViewConfig(backgroundColor: AppColors.bg2),
+                  categoryViewConfig: CategoryViewConfig(backgroundColor: AppColors.bg2),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PinnedBanner extends StatelessWidget {
+  final Message message;
+  const _PinnedBanner({required this.message});
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: AppColors.bg2,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          Container(width: 3, height: 32, color: AppColors.primary, margin: const EdgeInsets.only(right: 10)),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Закреплено', style: TextStyle(color: AppColors.primary, fontSize: 11, fontWeight: FontWeight.w600)),
+                Text(message.content, style: const TextStyle(color: AppColors.textSecondary, fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MessageBubble extends StatelessWidget {
+  final Message message;
+  final bool isOwn;
+  final bool isGroup;
+  final VoidCallback onLongPress;
+  final VoidCallback onReply;
+  final String currentUserId;
+
+  const _MessageBubble({
+    required this.message,
+    required this.isOwn,
+    required this.isGroup,
+    required this.onLongPress,
+    required this.onReply,
+    required this.currentUserId,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: isOwn ? Alignment.centerRight : Alignment.centerLeft,
+      child: GestureDetector(
+        onLongPress: onLongPress,
+        onHorizontalDragEnd: (d) {
+          if ((isOwn && d.primaryVelocity! < -100) || (!isOwn && d.primaryVelocity! > 100)) {
+            onReply();
+          }
+        },
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
+          child: Container(
+            margin: EdgeInsets.only(top: 2, bottom: 2, left: isOwn ? 60 : 0, right: isOwn ? 0 : 60),
+            child: Column(
+              crossAxisAlignment: isOwn ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+              children: [
+                if (isGroup && !isOwn)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 12, bottom: 2),
+                    child: Text(message.senderName, style: const TextStyle(color: AppColors.primary, fontSize: 12, fontWeight: FontWeight.w600)),
+                  ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    if (!isOwn && isGroup)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6, bottom: 4),
+                        child: AppAvatar(name: message.senderName, url: message.senderAvatar, size: 28),
+                      ),
+                    Flexible(child: _Bubble(message: message, isOwn: isOwn, currentUserId: currentUserId)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Bubble extends StatelessWidget {
+  final Message message;
+  final bool isOwn;
+  final String currentUserId;
+
+  const _Bubble({required this.message, required this.isOwn, required this.currentUserId});
+
+  @override
+  Widget build(BuildContext context) {
+    final isAi = message.type == 'ai';
+    final isForwarded = message.forwardFromUser != null;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        gradient: isOwn
+            ? const LinearGradient(colors: [AppColors.myBubble, AppColors.myBubbleDark], begin: Alignment.topLeft, end: Alignment.bottomRight)
+            : null,
+        color: isOwn ? null : (isAi ? AppColors.aiBubble : AppColors.otherBubble),
+        borderRadius: BorderRadius.only(
+          topLeft: const Radius.circular(16),
+          topRight: const Radius.circular(16),
+          bottomLeft: Radius.circular(isOwn ? 16 : 4),
+          bottomRight: Radius.circular(isOwn ? 4 : 16),
+        ),
+        border: isAi ? Border.all(color: AppColors.aiAccent.withOpacity(0.3), width: 1) : null,
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 4, offset: const Offset(0, 2))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Forwarded indicator
+          if (isForwarded)
+            Container(
+              margin: const EdgeInsets.only(bottom: 6),
+              padding: const EdgeInsets.only(left: 8),
+              decoration: BoxDecoration(
+                border: Border(left: BorderSide(color: isOwn ? Colors.white38 : AppColors.primary, width: 2)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Переслано от ${message.forwardFromUser}', style: TextStyle(color: isOwn ? Colors.white70 : AppColors.primary, fontSize: 11, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+          // Reply
+          if (message.replyTo != null && message.replyContent != null)
+            Container(
+              margin: const EdgeInsets.only(bottom: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.black26,
+                borderRadius: BorderRadius.circular(8),
+                border: Border(left: BorderSide(color: isOwn ? Colors.white54 : AppColors.primary, width: 2)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(message.replySender ?? 'Ответ', style: TextStyle(color: isOwn ? Colors.white70 : AppColors.primary, fontSize: 11, fontWeight: FontWeight.w600)),
+                  Text(message.replyContent!, style: TextStyle(color: isOwn ? Colors.white60 : AppColors.textSecondary, fontSize: 12), maxLines: 2, overflow: TextOverflow.ellipsis),
+                ],
+              ),
+            ),
+          // AI label
+          if (isAi)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(children: [
+                const Icon(Icons.auto_awesome, color: AppColors.aiAccent, size: 13),
+                const SizedBox(width: 4),
+                Text('AI-ответ', style: const TextStyle(color: AppColors.aiAccent, fontSize: 11, fontWeight: FontWeight.w600)),
+              ]),
+            ),
+          // Content
+          if (message.type == 'voice')
+            _VoiceBubble(message: message, isOwn: isOwn)
+          else
+            Text(
+              message.content,
+              style: TextStyle(
+                color: isOwn ? Colors.white : AppColors.textPrimary,
+                fontSize: 14.5,
+                height: 1.35,
+              ),
+            ),
+          const SizedBox(height: 4),
+          // Time + edited
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              if (message.editedAt != null)
+                Text('изменено  ', style: TextStyle(color: isOwn ? Colors.white54 : AppColors.textMuted, fontSize: 10)),
+              Text(
+                _formatTime(message.createdAt),
+                style: TextStyle(color: isOwn ? Colors.white54 : AppColors.textMuted, fontSize: 10.5),
+              ),
+              if (isOwn) ...[
+                const SizedBox(width: 4),
+                Icon(Icons.done_all, size: 14, color: Colors.white54),
+              ],
+            ],
+          ),
+          // Reactions
+          if (message.reactions.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: message.reactions.map((r) {
+                  final myReaction = r.users.contains(currentUserId);
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: myReaction
+                          ? AppColors.primary.withOpacity(0.25)
+                          : Colors.black.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(12),
+                      border: myReaction ? Border.all(color: AppColors.primary.withOpacity(0.5)) : null,
+                    ),
+                    child: Text('${r.emoji} ${r.count}', style: const TextStyle(fontSize: 12)),
+                  );
+                }).toList(),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  String _formatTime(DateTime dt) {
+    final local = dt.toLocal();
+    return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+  }
+}
+
+class _VoiceBubble extends StatefulWidget {
+  final Message message;
+  final bool isOwn;
+  const _VoiceBubble({required this.message, required this.isOwn});
+
+  @override
+  State<_VoiceBubble> createState() => _VoiceBubbleState();
+}
+
+class _VoiceBubbleState extends State<_VoiceBubble> {
+  final player = AudioPlayer();
+  bool isPlaying = false;
+  Duration duration = Duration.zero;
+  Duration position = Duration.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    player.onPlayerStateChanged.listen((state) {
+      setState(() => isPlaying = state == PlayerState.playing);
+    });
+    player.onDurationChanged.listen((d) {
+      setState(() => duration = d);
+    });
+    player.onPositionChanged.listen((p) {
+      setState(() => position = p);
+    });
+  }
+
+  @override
+  void dispose() {
+    player.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        gradient: widget.isOwn
+            ? const LinearGradient(colors: [AppColors.myBubble, AppColors.myBubbleDark], begin: Alignment.topLeft, end: Alignment.bottomRight)
+            : null,
+        color: widget.isOwn ? null : AppColors.otherBubble,
+        borderRadius: BorderRadius.only(
+          topLeft: const Radius.circular(16),
+          topRight: const Radius.circular(16),
+          bottomLeft: Radius.circular(widget.isOwn ? 16 : 4),
+          bottomRight: Radius.circular(widget.isOwn ? 4 : 16),
+        ),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 4, offset: const Offset(0, 2))],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            icon: Icon(isPlaying ? Icons.pause : Icons.play_arrow, color: widget.isOwn ? Colors.white : AppColors.primary),
+            onPressed: () async {
+              if (isPlaying) {
+                await player.pause();
+              } else {
+                await player.play(UrlSource('${ApiService.baseUrl}${widget.message.mediaUrl}'));
+              }
+            },
+          ),
+          Expanded(
+            child: Slider(
+              value: position.inSeconds.toDouble(),
+              max: duration.inSeconds.toDouble(),
+              onChanged: (v) async {
+                await player.seek(Duration(seconds: v.toInt()));
+              },
+              activeColor: widget.isOwn ? Colors.white : AppColors.primary,
+              inactiveColor: widget.isOwn ? Colors.white38 : AppColors.textMuted,
+            ),
+          ),
+          Text(
+            '${position.inMinutes}:${(position.inSeconds % 60).toString().padLeft(2, '0')}',
+            style: TextStyle(color: widget.isOwn ? Colors.white : AppColors.textPrimary, fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReplyBar extends StatelessWidget {
+  final Message? replyTo;
+  final Message? editing;
+  final VoidCallback onCancel;
+  const _ReplyBar({this.replyTo, this.editing, required this.onCancel});
+
+  @override
+  Widget build(BuildContext context) {
+    final isEdit = editing != null;
+    final msg = isEdit ? editing! : replyTo!;
+    return Container(
+      color: AppColors.bg3,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(
+        children: [
+          Icon(isEdit ? Icons.edit : Icons.reply, color: AppColors.primary, size: 18),
+          const SizedBox(width: 10),
+          Container(width: 2, height: 32, color: AppColors.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(isEdit ? 'Редактирование' : 'Ответить ${msg.senderName}', style: const TextStyle(color: AppColors.primary, fontSize: 12, fontWeight: FontWeight.w600)),
+                Text(msg.content, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
+              ],
+            ),
+          ),
+          IconButton(onPressed: onCancel, icon: const Icon(Icons.close, color: AppColors.textMuted, size: 18)),
+        ],
+      ),
+    );
+  }
+}
+
+class _InputBar extends StatelessWidget {
+  final TextEditingController controller;
+  final bool sending;
+  final bool isRecording;
+  final ValueChanged<String> onTyping;
+  final VoidCallback onSend;
+  final VoidCallback onEmojiToggle;
+  final VoidCallback onRecordStart;
+  final VoidCallback onRecordStop;
+
+  const _InputBar({
+    required this.controller,
+    required this.sending,
+    required this.isRecording,
+    required this.onTyping,
+    required this.onSend,
+    required this.onEmojiToggle,
+    required this.onRecordStart,
+    required this.onRecordStop,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: AppColors.bg2,
+      padding: EdgeInsets.only(
+        left: 8,
+        right: 8,
+        top: 8,
+        bottom: MediaQuery.of(context).padding.bottom + 8,
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.emoji_emotions_outlined, color: AppColors.textMuted),
+            onPressed: onEmojiToggle,
+          ),
+          Expanded(
+            child: TextField(
+              controller: controller,
+              style: const TextStyle(color: AppColors.textPrimary, fontSize: 15),
+              maxLines: 5,
+              minLines: 1,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                hintText: 'Сообщение...',
+                fillColor: AppColors.bg3,
+                border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(22)), borderSide: BorderSide.none),
+                contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              ),
+              onChanged: onTyping,
+              onSubmitted: (_) => onSend(),
+            ),
+          ),
+          const SizedBox(width: 6),
+          if (controller.text.trim().isEmpty)
+            GestureDetector(
+              onTap: isRecording ? onRecordStop : onRecordStart,
+              child: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: isRecording ? Colors.red : AppColors.bg4,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  isRecording ? Icons.stop : Icons.mic,
+                  color: isRecording ? Colors.white : AppColors.textMuted,
+                  size: 20,
+                ),
+              ),
+            )
+          else
+            GestureDetector(
+              onTap: sending ? null : onSend,
+              child: Container(
+                width: 44,
+                height: 44,
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(colors: [AppColors.primary, AppColors.primaryDark]),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.send_rounded,
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OptionTile extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color? color;
+  final VoidCallback onTap;
+  const _OptionTile({required this.icon, required this.label, this.color, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: Icon(icon, color: color ?? AppColors.primary, size: 22),
+      title: Text(label, style: TextStyle(color: color ?? AppColors.textPrimary)),
+      onTap: onTap,
+    );
+  }
+}
+
+class _ForwardSheet extends StatefulWidget {
+  final Message message;
+  final String senderName;
+  final Future<void> Function(String targetChatId) onForward;
+  const _ForwardSheet({required this.message, required this.senderName, required this.onForward});
+
+  @override
+  State<_ForwardSheet> createState() => _ForwardSheetState();
+}
+
+class _ForwardSheetState extends State<_ForwardSheet> {
+  List<dynamic> _chats = [];
+  List<dynamic> _filtered = [];
+  bool _loading = true;
+  final _searchCtrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    try {
+      final data = await ApiService.getChats();
+      if (!mounted) return;
+      setState(() { _chats = data; _filtered = data; _loading = false; });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _onSearch(String q) {
+    final query = q.toLowerCase();
+    setState(() {
+      _filtered = q.isEmpty
+          ? _chats
+          : _chats.where((c) => (c['display_name'] ?? '').toString().toLowerCase().contains(query)).toList();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.75,
+      maxChildSize: 0.95,
+      minChildSize: 0.4,
+      expand: false,
+      builder: (_, ctrl) => Column(
+        children: [
+          const SizedBox(height: 12),
+          Container(width: 36, height: 4, decoration: BoxDecoration(color: AppColors.textMuted.withOpacity(0.4), borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 16),
+          const Text('Переслать в...', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+          const SizedBox(height: 8),
+          Container(
+            margin: const EdgeInsets.only(bottom: 6, left: 12, right: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(color: AppColors.bg3, borderRadius: BorderRadius.circular(10)),
+            child: Row(
+              children: [
+                Container(width: 3, height: 32, color: AppColors.primary, margin: const EdgeInsets.only(right: 10)),
+                Expanded(child: Text(widget.message.content, style: const TextStyle(color: AppColors.textSecondary, fontSize: 13), maxLines: 2, overflow: TextOverflow.ellipsis)),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: TextField(
+              controller: _searchCtrl,
+              onChanged: _onSearch,
+              style: const TextStyle(color: AppColors.textPrimary),
+              decoration: const InputDecoration(
+                hintText: 'Поиск чатов...',
+                prefixIcon: Icon(Icons.search, color: AppColors.textMuted, size: 20),
+              ),
+            ),
+          ),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+                : ListView.builder(
+                    controller: ctrl,
+                    itemCount: _filtered.length,
+                    itemBuilder: (_, i) {
+                      final c = _filtered[i];
+                      return ListTile(
+                        leading: AppAvatar(name: c['display_name'] ?? 'Чат', url: c['display_avatar'], size: 44),
+                        title: Text(c['display_name'] ?? 'Чат', style: const TextStyle(color: AppColors.textPrimary)),
+                        subtitle: Text(c['type'] == 'group' ? 'Группа' : 'Личный чат', style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                        onTap: () => widget.onForward(c['id']),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
