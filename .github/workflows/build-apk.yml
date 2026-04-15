@@ -70,19 +70,46 @@ jobs:
           echo ""
           echo "📋 Flutter config:"
           flutter doctor -v
+          
+          echo ""
+          echo "📋 Flutter pub list:"
+          flutter pub list 2>/dev/null | head -20 || echo "Could not list pub packages"
+
+      - name: Clean Flutter build cache
+        run: |
+          echo "🧹 Cleaning Flutter build artifacts..."
+          flutter clean
+          rm -rf build/
+          flutter pub get
+          echo "✅ Clean complete"
 
       - name: Build APK (debug first)
         continue-on-error: true
         run: |
           echo "🔨 Building debug APK..."
-          flutter build apk --debug -v 2>&1 | tee -a build.log
-          echo "Exit code: $?"
+          flutter build apk --debug -v 2>&1 | tee build_debug.log
+          EXIT_CODE=${PIPESTATUS[0]}
+          echo "Debug build exit code: $EXIT_CODE"
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "❌ Debug build failed, but continuing..."
+          fi
 
       - name: Build APK (release)
         run: |
           echo "🔨 Building release APK..."
-          flutter build apk --release -v 2>&1 | tee -a build.log
-          echo "Exit code: $?"
+          set -e
+          flutter build apk --release -v 2>&1 | tee build_release.log
+          EXIT_CODE=${PIPESTATUS[0]}
+          echo "Release build exit code: $EXIT_CODE"
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "✅ Release APK build successful"
+          else
+            echo "❌ Release APK build failed!"
+            echo ""
+            echo "=== BUILD_RELEASE.LOG CONTENT ==="
+            cat build_release.log
+            exit 1
+          fi
 
       - name: Check build output
         if: always()
@@ -90,37 +117,40 @@ jobs:
           echo "📂 Checking build directory..."
           if [ -d "build" ]; then
             echo "✅ build directory exists"
-            find build -type d -name "apk" 2>/dev/null | head -20 || echo "No apk directories found"
-            find build -name "*.apk" 2>/dev/null | head -20 || echo "No APK files found"
+            echo ""
+            echo "📋 Build directory contents:"
+            find build -type f -name "*.apk" 2>/dev/null || echo "No APK files in build/"
+            echo ""
+            echo "📋 Full build tree:"
+            find build -type d | head -30
           else
-            echo "❌ build directory does not exist"
-            echo "Current directory contents:"
+            echo "❌ build directory NOT created"
             ls -lah
           fi
 
-      - name: List APK files
+      - name: Display build logs
         if: always()
-        continue-on-error: true
         run: |
-          echo "🔍 Searching for APK files..."
-          if [ -d "build" ]; then
-            find build -name "*.apk" -type f -exec ls -lh {} \; 2>/dev/null || true
-          else
-            echo "⚠️ build directory not found"
-            echo "Listing root directory:"
-            ls -lah .
+          echo "📋 Displaying build logs..."
+          if [ -f build_debug.log ]; then
+            echo "=== DEBUG BUILD LOG ==="
+            tail -100 build_debug.log
+            echo ""
           fi
-          echo ""
-          echo "📂 Expected build structure:"
-          echo "build/app/outputs/apk/release/ (for release APKs)"
-          echo "build/app/outputs/apk/debug/ (for debug APKs)"
+          if [ -f build_release.log ]; then
+            echo "=== RELEASE BUILD LOG ==="
+            tail -100 build_release.log
+            echo ""
+          fi
 
       - name: Upload build logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: build-logs
-          path: build.log
+          path: |
+            build_debug.log
+            build_release.log
           retention-days: 7
 
       - name: Find and upload APK artifacts
@@ -132,14 +162,28 @@ jobs:
           
           if [ -z "$APK_FILES" ]; then
             echo "⚠️ No APK files found!"
-            echo "Build directory structure:"
-            find . -maxdepth 3 -type d | head -30
+            echo ""
+            echo "=== ATTEMPTING TO DIAGNOSE ==="
+            if [ -f build_release.log ]; then
+              echo "Last 50 lines of release build log:"
+              tail -50 build_release.log
+            fi
+            if [ -f build_debug.log ]; then
+              echo ""
+              echo "Last 50 lines of debug build log:"
+              tail -50 build_debug.log
+            fi
+            echo ""
+            echo "Flutter doctor output:"
+            flutter doctor -v
             exit 1
           else
             echo "✅ Found APK files:"
             echo "$APK_FILES"
             mkdir -p apk_artifacts
             find . -name "*.apk" -type f -exec cp {} apk_artifacts/ \;
+            echo ""
+            echo "📦 Copied APKs:"
             ls -lah apk_artifacts/
           fi
 
