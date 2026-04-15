@@ -1,4 +1,5 @@
 import 'dart:ffi' as ffi;
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:ffi/ffi.dart' as ffi_lib;
 
@@ -45,15 +46,15 @@ class EncryptionFFI {
       // Android: 'libmessenger_crypto.so'
       const libName = 'libmessenger_crypto';
 
-      if (ffi.Platform.isWindows) {
+      if (Platform.isWindows) {
         _library = ffi.DynamicLibrary.open('$libName.dll');
-      } else if (ffi.Platform.isMacOS) {
+      } else if (Platform.isMacOS) {
         _library = ffi.DynamicLibrary.open('$libName.dylib');
-      } else if (ffi.Platform.isLinux) {
+      } else if (Platform.isLinux) {
         _library = ffi.DynamicLibrary.open('lib$libName.so');
-      } else if (ffi.Platform.isAndroid) {
+      } else if (Platform.isAndroid) {
         _library = ffi.DynamicLibrary.open('lib$libName.so');
-      } else if (ffi.Platform.isIOS) {
+      } else if (Platform.isIOS) {
         // iOS uses static linking in Xcode
         _library = ffi.DynamicLibrary.process();
       } else {
