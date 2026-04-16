@@ -71,7 +71,10 @@ class _SplashScreenState extends State<_SplashScreen> with SingleTickerProviderS
         wsService.connect();
         Navigator.pushReplacement(context, _buildRoute(const HomeScreen()));
         return;
-      } catch (_) {}
+      } catch (_) {
+        // Токен невалидный — удаляем, чтобы не зацикливаться
+        await ApiService.deleteToken();
+      }
     }
     Navigator.pushReplacement(context, _buildRoute(const EmailScreen()));
   }
