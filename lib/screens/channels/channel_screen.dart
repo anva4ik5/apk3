@@ -73,10 +73,10 @@ class _ChannelScreenState extends State<ChannelScreen> {
           description: _channel.description,
           avatarUrl: _channel.avatarUrl,
           ownerName: _channel.ownerName,
-          subscriberCount: _channel.subscriberCount + (result['subscribed'] ? 1 : -1),
+          subscriberCount: _channel.subscriberCount + (result['subscribed'] == true ? 1 : -1),
           isPublic: _channel.isPublic,
           monthlyPrice: _channel.monthlyPrice,
-          isSubscribed: result['subscribed'],
+          isSubscribed: result['subscribed'] ?? false,
           isOwner: _channel.isOwner,
         );
       });
