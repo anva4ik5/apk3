@@ -243,30 +243,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   padding: const EdgeInsets.all(20),
                   child: Column(
                     children: [
-                      Stack(
-                        children: [
-                          AppAvatar(name: _user!.displayName, url: _user!.avatarUrl, size: 90),
-                          if (_editing)
+                      GestureDetector(
+                        onTap: _saving ? null : _uploadAvatar,
+                        child: Stack(
+                          children: [
+                            AppAvatar(name: _user!.displayName, url: _user!.avatarUrl, size: 90),
                             Positioned(
                               right: 0,
                               bottom: 0,
-                              child: GestureDetector(
-                                onTap: _saving ? null : _uploadAvatar,
-                                child: Container(
-                                  width: 30,
-                                  height: 30,
-                                  decoration: BoxDecoration(
-                                    color: AppColors.primary,
-                                    shape: BoxShape.circle,
-                                    border: Border.all(color: AppColors.bg1, width: 2),
-                                  ),
-                                  child: _saving
-                                      ? const Padding(padding: EdgeInsets.all(6), child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                                      : const Icon(Icons.camera_alt, size: 16, color: Colors.white),
+                              child: Container(
+                                width: 30,
+                                height: 30,
+                                decoration: BoxDecoration(
+                                  color: AppColors.primary,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: AppColors.bg1, width: 2),
                                 ),
+                                child: _saving
+                                    ? const Padding(padding: EdgeInsets.all(6), child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                    : const Icon(Icons.camera_alt, size: 16, color: Colors.white),
                               ),
                             ),
-                        ],
+                          ],
+                        ),
                       ),
                       const SizedBox(height: 16),
 
