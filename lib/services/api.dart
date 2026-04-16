@@ -185,7 +185,7 @@ class ApiService {
 
   static Future<bool> isContact(String userId) async {
     final data = await get('/api/contacts/check/$userId');
-    return data['isContact'] as bool;
+    return data['isContact'] == true;
   }
 
   // --- Channels ---
