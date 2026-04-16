@@ -126,6 +126,17 @@ class ApiService {
     return data['avatarUrl'] as String;
   }
 
+  static Future<String> uploadMedia(File file) async {
+    final token = await getToken();
+    final request = http.MultipartRequest('POST', Uri.parse('$baseUrl/api/upload'));
+    if (token != null) request.headers['Authorization'] = 'Bearer $token';
+    request.files.add(await http.MultipartFile.fromPath('file', file.path));
+    final streamed = await request.send().timeout(_timeout);
+    final response = await http.Response.fromStream(streamed);
+    final data = _handle(response);
+    return data['url'] as String;
+  }
+
   static Future<List<dynamic>> searchUsersGlobal(String q) async {
     return (await get('/api/auth/users/search?q=${Uri.encodeComponent(q)}')) as List<dynamic>;
   }
