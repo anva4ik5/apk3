@@ -57,7 +57,7 @@ class _OtpScreenState extends State<OtpScreen> {
     try {
       final result = await ApiService.verifyOtp(widget.identifier, _code);
       if (!mounted) return;
-      if (result['isNewUser'] == true) {
+      if (result['needsRegistration'] == true) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => RegisterScreen(identifier: widget.identifier)),
