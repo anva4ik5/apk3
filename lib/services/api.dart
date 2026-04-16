@@ -72,7 +72,11 @@ class ApiService {
       ..._buildEmailPayload(identifier),
       'code': code,
     }, auth: false);
-    if (data['token'] != null) await saveToken(data['token']);
+    // Сохраняем токен только если пользователь уже существует
+    // Для нового юзера (needsRegistration: true) токена нет — он выдаётся после register()
+    if (data['needsRegistration'] != true && data['token'] != null) {
+      await saveToken(data['token']);
+    }
     return data as Map<String, dynamic>;
   }
 
