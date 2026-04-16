@@ -55,21 +55,22 @@ class ApiService {
   }
 
   // --- Auth ---
-  static bool _isEmail(String identifier) => RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(identifier);
+  static bool _isEmail(String identifier) => RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(identifier.trim());
+  static bool _isPhone(String identifier) => RegExp(r'^\+?[0-9]{7,15}$').hasMatch(identifier.trim());
 
-  static Map<String, dynamic> _buildEmailPayload(String identifier) {
-    if (!_isEmail(identifier)) {
-      throw ApiException('Для входа используется только email', 400);
-    }
-    return {'email': identifier.trim().toLowerCase()};
+  static Map<String, dynamic> _buildAuthPayload(String identifier) {
+    final value = identifier.trim();
+    if (_isEmail(value)) return {'email': value.toLowerCase()};
+    if (_isPhone(value)) return {'phone': value};
+    throw ApiException('Введите корректный email или телефон', 400);
   }
 
   static Future<void> sendOtp(String identifier) =>
-      post('/api/auth/send-otp', _buildEmailPayload(identifier), auth: false);
+      post('/api/auth/send-otp', _buildAuthPayload(identifier), auth: false);
 
   static Future<Map<String, dynamic>> verifyOtp(String identifier, String code) async {
     final data = await post('/api/auth/verify-otp', {
-      ..._buildEmailPayload(identifier),
+      ..._buildAuthPayload(identifier),
       'code': code,
     }, auth: false);
     // Сохраняем токен только если пользователь уже существует
@@ -80,13 +81,15 @@ class ApiService {
     return data as Map<String, dynamic>;
   }
 
-  static Future<String> register(String email, String username, String displayName, {String? phone}) async {
-    final data = await post('/api/auth/register', {
-      'email': email.trim().toLowerCase(),
-      if (phone != null && phone.isNotEmpty) 'phone': phone.trim(),
+  static Future<String> register(String identifier, String username, String displayName, {String? phone}) async {
+    final payload = <String, dynamic>{
       'username': username,
       'displayName': displayName,
-    }, auth: false);
+      if (_isEmail(identifier)) 'email': identifier.trim().toLowerCase(),
+      if (_isPhone(identifier)) 'phone': identifier.trim(),
+      if (phone != null && phone.isNotEmpty) 'phone': phone.trim(),
+    };
+    final data = await post('/api/auth/register', payload, auth: false);
     await saveToken(data['token']);
     return data['token'] as String;
   }

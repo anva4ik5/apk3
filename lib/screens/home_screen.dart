@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme.dart';
+import 'calls/calls_screen.dart';
 import 'chats/chats_screen.dart';
 import 'contacts/contacts_screen.dart';
 import 'channels/channels_screen.dart';
@@ -16,6 +17,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   final _screens = const [
     ChatsScreen(),
+    CallsScreen(),
     ContactsScreen(),
     ChannelsScreen(),
     ProfileScreen(),
@@ -60,9 +62,10 @@ class _BottomNav extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
               _NavItem(index: 0, current: currentIndex, icon: Icons.chat_bubble_outline_rounded, activeIcon: Icons.chat_bubble_rounded, label: 'Чаты', onTap: onTap),
-              _NavItem(index: 1, current: currentIndex, icon: Icons.people_outline_rounded, activeIcon: Icons.people_rounded, label: 'Контакты', onTap: onTap),
-              _NavItem(index: 2, current: currentIndex, icon: Icons.rss_feed_rounded, activeIcon: Icons.rss_feed_rounded, label: 'Каналы', onTap: onTap),
-              _NavItem(index: 3, current: currentIndex, icon: Icons.person_outline_rounded, activeIcon: Icons.person_rounded, label: 'Я', onTap: onTap),
+              _NavItem(index: 1, current: currentIndex, icon: Icons.call_outlined, activeIcon: Icons.call, label: 'Звонки', onTap: onTap),
+              _NavItem(index: 2, current: currentIndex, icon: Icons.people_outline_rounded, activeIcon: Icons.people_rounded, label: 'Контакты', onTap: onTap),
+              _NavItem(index: 3, current: currentIndex, icon: Icons.rss_feed_rounded, activeIcon: Icons.rss_feed_rounded, label: 'Каналы', onTap: onTap),
+              _NavItem(index: 4, current: currentIndex, icon: Icons.person_outline_rounded, activeIcon: Icons.person_rounded, label: 'Я', onTap: onTap),
             ],
           ),
         ),

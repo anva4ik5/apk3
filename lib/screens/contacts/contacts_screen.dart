@@ -107,14 +107,17 @@ class _ContactsScreenState extends State<ContactsScreen> {
           : Column(
               children: [
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
                   child: TextField(
                     onChanged: (q) { setState(() { _search = q; _applyFilter(); }); },
                     style: const TextStyle(color: AppColors.textPrimary),
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText: 'Поиск контактов...',
-                      fillColor: AppColors.bg3,
-                      prefixIcon: Icon(Icons.search, color: AppColors.textMuted, size: 20),
+                      filled: true,
+                      fillColor: AppColors.bg4,
+                      prefixIcon: const Icon(Icons.search, color: AppColors.textMuted, size: 20),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: BorderSide.none),
                     ),
                   ),
                 ),
@@ -136,16 +139,22 @@ class _ContactsScreenState extends State<ContactsScreen> {
                                 ),
                                 if (_search.isEmpty) ...[
                                   const SizedBox(height: 8),
-                                  TextButton.icon(
+                                  ElevatedButton.icon(
                                     onPressed: _addContact,
                                     icon: const Icon(Icons.person_add),
                                     label: const Text('Добавить'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: AppColors.primary,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                    ),
                                   ),
                                 ],
                               ],
                             ),
                           )
                         : ListView(
+                            padding: const EdgeInsets.only(bottom: 18),
+                            physics: const AlwaysScrollableScrollPhysics(),
                             children: [
                               if (online.isNotEmpty) ...[
                                 _SectionHeader(title: 'В сети (${online.length})'),
@@ -193,23 +202,53 @@ class _ContactTile extends StatelessWidget {
       subtitle = 'В сети';
     }
 
-    return ListTile(
+    return GestureDetector(
       onTap: onTap,
-      leading: AppAvatar(
-        name: contact.displayLabel,
-        url: contact.avatarUrl,
-        size: 48,
-        showOnline: true,
-        isOnline: contact.isOnline,
-      ),
-      title: Text(contact.displayLabel, style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w500)),
-      subtitle: Text(subtitle, style: TextStyle(
-        color: contact.isOnline ? AppColors.green : AppColors.textSecondary,
-        fontSize: 12,
-      )),
-      trailing: IconButton(
-        icon: const Icon(Icons.message_outlined, color: AppColors.primary, size: 20),
-        onPressed: onTap,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppColors.bg3,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: AppColors.divider),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 12, offset: const Offset(0, 4)),
+          ],
+        ),
+        child: Row(
+          children: [
+            AppAvatar(
+              name: contact.displayLabel,
+              url: contact.avatarUrl,
+              size: 48,
+              showOnline: true,
+              isOnline: contact.isOnline,
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(contact.displayLabel, style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 4),
+                  Text(subtitle, style: TextStyle(color: contact.isOnline ? AppColors.green : AppColors.textSecondary, fontSize: 13, height: 1.3)),
+                ],
+              ),
+            ),
+            GestureDetector(
+              onTap: onTap,
+              child: Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(Icons.message_outlined, color: Colors.white, size: 20),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
