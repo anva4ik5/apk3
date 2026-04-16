@@ -77,23 +77,72 @@ class _ChatsScreenState extends State<ChatsScreen> {
     setState(() { _search = q; _applyFilter(); });
   }
 
-  void _openNewChat(BuildContext context) async {
-    final data = await ApiService.searchUsersGlobal('');
-    if (!context.mounted) return;
+  void _openNewChat(BuildContext context) {
     showModalBottomSheet(
       context: context,
       backgroundColor: AppColors.bg2,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      isScrollControlled: true,
-      builder: (_) => _NewChatSheet(onStart: (userId) async {
-        final result = await ApiService.openDirectChat(userId);
-        if (!context.mounted) return;
-        Navigator.pop(context);
-        Navigator.push(context, MaterialPageRoute(
-          builder: (_) => ChatScreen(chatId: result['chatId']),
-        ));
-        _load();
-      }),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Container(width: 36, height: 4, decoration: BoxDecoration(color: AppColors.textMuted.withOpacity(0.4), borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 16),
+            const Text('Новый чат', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            const SizedBox(height: 8),
+            ListTile(
+              leading: Container(
+                width: 44, height: 44,
+                decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.15), shape: BoxShape.circle),
+                child: const Icon(Icons.person_outline, color: AppColors.primary),
+              ),
+              title: const Text('Личный чат', style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w500)),
+              subtitle: const Text('Написать пользователю', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+              onTap: () {
+                Navigator.pop(context);
+                showModalBottomSheet(
+                  context: context,
+                  backgroundColor: AppColors.bg2,
+                  shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+                  isScrollControlled: true,
+                  builder: (_) => _NewChatSheet(onStart: (userId) async {
+                    final result = await ApiService.openDirectChat(userId);
+                    if (!context.mounted) return;
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => ChatScreen(chatId: result['chatId'])));
+                    _load();
+                  }),
+                );
+              },
+            ),
+            ListTile(
+              leading: Container(
+                width: 44, height: 44,
+                decoration: BoxDecoration(color: AppColors.green.withOpacity(0.15), shape: BoxShape.circle),
+                child: const Icon(Icons.group_outlined, color: AppColors.green),
+              ),
+              title: const Text('Создать группу', style: TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w500)),
+              subtitle: const Text('Группа для общения', style: TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+              onTap: () {
+                Navigator.pop(context);
+                showModalBottomSheet(
+                  context: context,
+                  backgroundColor: AppColors.bg2,
+                  shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+                  isScrollControlled: true,
+                  builder: (_) => _CreateGroupSheet(onCreate: (chatId) {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => ChatScreen(chatId: chatId)));
+                    _load();
+                  }),
+                );
+              },
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
     );
   }
 
@@ -339,6 +388,207 @@ class _NewChatSheetState extends State<_NewChatSheet> {
                         title: Text(u['display_name'] ?? u['username'], style: const TextStyle(color: AppColors.textPrimary)),
                         subtitle: Text('@${u['username']}', style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
                         onTap: () => widget.onStart(u['id']),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CreateGroupSheet extends StatefulWidget {
+  final void Function(String chatId) onCreate;
+  const _CreateGroupSheet({required this.onCreate});
+  @override
+  State<_CreateGroupSheet> createState() => _CreateGroupSheetState();
+}
+
+class _CreateGroupSheetState extends State<_CreateGroupSheet> {
+  final _nameCtrl = TextEditingController();
+  final _descCtrl = TextEditingController();
+  List<dynamic> _searchResults = [];
+  final List<Map<String, dynamic>> _selected = [];
+  bool _searching = false;
+  bool _creating = false;
+  Timer? _debounce;
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _descCtrl.dispose();
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  void _onSearch(String q) {
+    _debounce?.cancel();
+    if (q.trim().length < 2) { setState(() => _searchResults = []); return; }
+    _debounce = Timer(const Duration(milliseconds: 350), () async {
+      setState(() => _searching = true);
+      try {
+        final r = await ApiService.searchUsersGlobal(q.trim());
+        if (mounted) setState(() { _searchResults = r; _searching = false; });
+      } catch (_) {
+        if (mounted) setState(() => _searching = false);
+      }
+    });
+  }
+
+  void _toggleUser(Map<String, dynamic> u) {
+    final id = u['id'] as String;
+    setState(() {
+      if (_selected.any((s) => s['id'] == id)) {
+        _selected.removeWhere((s) => s['id'] == id);
+      } else {
+        _selected.add(u);
+      }
+    });
+  }
+
+  Future<void> _create() async {
+    if (_nameCtrl.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Введите название группы'), backgroundColor: Colors.orange, behavior: SnackBarBehavior.floating),
+      );
+      return;
+    }
+    if (_selected.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Добавьте хотя бы одного участника'), backgroundColor: Colors.orange, behavior: SnackBarBehavior.floating),
+      );
+      return;
+    }
+    setState(() => _creating = true);
+    try {
+      final memberIds = _selected.map((u) => u['id'] as String).toList();
+      final result = await ApiService.createGroup(
+        _nameCtrl.text.trim(),
+        memberIds,
+        description: _descCtrl.text.trim().isNotEmpty ? _descCtrl.text.trim() : null,
+      );
+      if (!mounted) return;
+      widget.onCreate(result['chatId'] ?? result['id']);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _creating = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString()), backgroundColor: AppColors.red, behavior: SnackBarBehavior.floating),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.85,
+      maxChildSize: 0.95,
+      minChildSize: 0.5,
+      expand: false,
+      builder: (_, ctrl) => Column(
+        children: [
+          const SizedBox(height: 12),
+          Container(width: 36, height: 4, decoration: BoxDecoration(color: AppColors.textMuted.withOpacity(0.4), borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                const Expanded(child: Text('Создать группу', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: AppColors.textPrimary))),
+                TextButton(
+                  onPressed: _creating ? null : _create,
+                  child: _creating
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary))
+                      : const Text('Создать', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: TextField(
+              controller: _nameCtrl,
+              style: const TextStyle(color: AppColors.textPrimary),
+              decoration: const InputDecoration(hintText: 'Название группы', prefixIcon: Icon(Icons.group, color: AppColors.textMuted, size: 20)),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: TextField(
+              controller: _descCtrl,
+              style: const TextStyle(color: AppColors.textPrimary),
+              decoration: const InputDecoration(hintText: 'Описание (необязательно)', prefixIcon: Icon(Icons.info_outline, color: AppColors.textMuted, size: 20)),
+            ),
+          ),
+          const SizedBox(height: 8),
+          if (_selected.isNotEmpty)
+            SizedBox(
+              height: 64,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                itemCount: _selected.length,
+                itemBuilder: (_, i) {
+                  final u = _selected[i];
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Column(
+                      children: [
+                        Stack(
+                          children: [
+                            AppAvatar(name: u['display_name'] ?? u['username'], url: u['avatar_url'], size: 40),
+                            Positioned(
+                              right: 0, top: 0,
+                              child: GestureDetector(
+                                onTap: () => _toggleUser(u),
+                                child: Container(
+                                  width: 16, height: 16,
+                                  decoration: const BoxDecoration(color: AppColors.red, shape: BoxShape.circle),
+                                  child: const Icon(Icons.close, size: 10, color: Colors.white),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        Text(u['display_name'] ?? u['username'], style: const TextStyle(color: AppColors.textSecondary, fontSize: 10), overflow: TextOverflow.ellipsis),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: TextField(
+              onChanged: _onSearch,
+              style: const TextStyle(color: AppColors.textPrimary),
+              decoration: const InputDecoration(
+                hintText: 'Добавить участников...',
+                prefixIcon: Icon(Icons.search, color: AppColors.textMuted, size: 20),
+              ),
+            ),
+          ),
+          Expanded(
+            child: _searching
+                ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+                : ListView.builder(
+                    controller: ctrl,
+                    itemCount: _searchResults.length,
+                    itemBuilder: (_, i) {
+                      final u = _searchResults[i];
+                      final isSelected = _selected.any((s) => s['id'] == u['id']);
+                      return ListTile(
+                        leading: AppAvatar(name: u['display_name'] ?? u['username'], url: u['avatar_url'], size: 44),
+                        title: Text(u['display_name'] ?? u['username'], style: const TextStyle(color: AppColors.textPrimary)),
+                        subtitle: Text('@${u['username']}', style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                        trailing: isSelected
+                            ? const Icon(Icons.check_circle, color: AppColors.primary)
+                            : const Icon(Icons.radio_button_unchecked, color: AppColors.textMuted),
+                        onTap: () => _toggleUser(u as Map<String, dynamic>),
                       );
                     },
                   ),
