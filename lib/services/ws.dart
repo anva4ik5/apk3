@@ -73,7 +73,15 @@ class WsService {
     if (_disposed) return;
     _pingTimer?.cancel();
     _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(const Duration(seconds: 3), connect);
+    _reconnectTimer = Timer(const Duration(seconds: 3), () async {
+      await connect();
+      // Rejoin all active chat rooms after reconnect
+      if (_connected) {
+        for (final chatId in _controllers.keys) {
+          send({'type': 'join_chat', 'payload': {'chatId': chatId}});
+        }
+      }
+    });
   }
 
   void send(Map<String, dynamic> data) {
