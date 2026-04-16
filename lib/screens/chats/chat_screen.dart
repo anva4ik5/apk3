@@ -8,6 +8,7 @@ import 'package:timeago/timeago.dart' as timeago;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:http/http.dart' as http;
 import 'package:record/record.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../models/chat.dart';
 import '../../models/user.dart';
 import '../../services/api.dart';
@@ -79,6 +80,55 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     } catch (e) {
       // error
+    }
+  }
+
+  Future<void> _sendImage() async {
+    final picker = ImagePicker();
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: AppColors.bg2,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Container(width: 36, height: 4, decoration: BoxDecoration(color: AppColors.textMuted.withOpacity(0.4), borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 16),
+            const Text('Отправить фото', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            const SizedBox(height: 8),
+            ListTile(
+              leading: const Icon(Icons.camera_alt, color: AppColors.primary),
+              title: const Text('Камера', style: TextStyle(color: AppColors.textPrimary)),
+              onTap: () => Navigator.pop(context, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library, color: AppColors.primary),
+              title: const Text('Галерея', style: TextStyle(color: AppColors.textPrimary)),
+              onTap: () => Navigator.pop(context, ImageSource.gallery),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (source == null || !mounted) return;
+    final XFile? image = await picker.pickImage(source: source, maxWidth: 1280, maxHeight: 1280, imageQuality: 80);
+    if (image == null || !mounted) return;
+    setState(() => _sending = true);
+    try {
+      final url = await ApiService.uploadMedia(File(image.path));
+      wsService.sendMessage(widget.chatId, '', type: 'image', mediaUrl: url);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Ошибка отправки: $e'), backgroundColor: AppColors.red, behavior: SnackBarBehavior.floating),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
     }
   }
 
@@ -607,6 +657,7 @@ class _ChatScreenState extends State<ChatScreen> {
             onEmojiToggle: () => setState(() => _showEmojiPicker = !_showEmojiPicker),
             onRecordStart: _startRecording,
             onRecordStop: _stopRecording,
+            onAttach: _sendImage,
           ),
           if (_showEmojiPicker)
             SizedBox(
@@ -980,6 +1031,7 @@ class _InputBar extends StatelessWidget {
   final VoidCallback onEmojiToggle;
   final VoidCallback onRecordStart;
   final VoidCallback onRecordStop;
+  final VoidCallback onAttach;
 
   const _InputBar({
     required this.controller,
@@ -990,6 +1042,7 @@ class _InputBar extends StatelessWidget {
     required this.onEmojiToggle,
     required this.onRecordStart,
     required this.onRecordStop,
+    required this.onAttach,
   });
 
   @override
@@ -1007,6 +1060,11 @@ class _InputBar extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.emoji_emotions_outlined, color: AppColors.textMuted),
             onPressed: onEmojiToggle,
+          ),
+          IconButton(
+            icon: const Icon(Icons.attach_file_rounded, color: AppColors.textMuted),
+            onPressed: sending ? null : onAttach,
+            tooltip: 'Прикрепить фото',
           ),
           Expanded(
             child: TextField(
