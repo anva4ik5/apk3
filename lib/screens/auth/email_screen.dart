@@ -31,14 +31,17 @@ class _EmailScreenState extends State<EmailScreen> with SingleTickerProviderStat
     super.dispose();
   }
 
+  bool _isEmail(String value) => RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(value.trim());
+  bool _isPhone(String value) => RegExp(r'^\+?[0-9]{7,15}$').hasMatch(value.trim());
+
   bool get _identifierValid {
     final value = _ctrl.text.trim();
-    return RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(value);
+    return _isEmail(value) || _isPhone(value);
   }
 
   Future<void> _send() async {
     if (!_identifierValid) {
-      setState(() => _error = 'Введите корректный email');
+      setState(() => _error = 'Введите корректный email или телефон');
       return;
     }
     setState(() { _loading = true; _error = null; });
@@ -98,7 +101,7 @@ class _EmailScreenState extends State<EmailScreen> with SingleTickerProviderStat
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    'Введите email или номер телефона для входа или регистрации',
+                    'Введите email или телефон для входа или регистрации',
                     style: TextStyle(color: AppColors.textSecondary, fontSize: 15, height: 1.4),
                   ),
                   const SizedBox(height: 40),
@@ -111,7 +114,7 @@ class _EmailScreenState extends State<EmailScreen> with SingleTickerProviderStat
                     onChanged: (_) => setState(() => _error = null),
                     style: const TextStyle(color: AppColors.textPrimary, fontSize: 15),
                     decoration: InputDecoration(
-                      hintText: 'email@example.com',
+                      hintText: 'email@example.com или +71234567890',
                       prefixIcon: const Icon(Icons.email_outlined, color: AppColors.textMuted, size: 20),
                       errorText: _error,
                       errorStyle: const TextStyle(color: AppColors.red),

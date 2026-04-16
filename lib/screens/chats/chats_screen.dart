@@ -163,17 +163,19 @@ class _ChatsScreenState extends State<ChatsScreen> {
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
             child: TextField(
               onChanged: _onSearch,
               style: const TextStyle(color: AppColors.textPrimary),
               decoration: InputDecoration(
-                hintText: 'Поиск чатов...',
+                filled: true,
                 fillColor: AppColors.bg3,
+                hintText: 'Поиск чатов...',
                 prefixIcon: const Icon(Icons.search, color: AppColors.textMuted, size: 20),
                 suffixIcon: _search.isNotEmpty
                     ? IconButton(icon: const Icon(Icons.close, color: AppColors.textMuted, size: 18), onPressed: () { setState(() { _search = ''; _applyFilter(); }); })
                     : null,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: BorderSide.none),
               ),
             ),
           ),
@@ -220,8 +222,15 @@ class _ChatTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
+      borderRadius: BorderRadius.circular(22),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.bg3,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: AppColors.divider),
+        ),
         child: Row(
           children: [
             AppAvatar(
@@ -231,7 +240,7 @@ class _ChatTile extends StatelessWidget {
               showOnline: chat.type == 'direct',
               isOnline: chat.otherUserOnline,
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -241,7 +250,7 @@ class _ChatTile extends StatelessWidget {
                       Expanded(
                         child: Text(
                           chat.displayName,
-                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -252,33 +261,34 @@ class _ChatTile extends StatelessWidget {
                         ),
                     ],
                   ),
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 8),
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       if (chat.isMuted)
                         const Padding(
-                          padding: EdgeInsets.only(right: 4),
-                          child: Icon(Icons.volume_off, size: 13, color: AppColors.textMuted),
+                          padding: EdgeInsets.only(right: 6, top: 2),
+                          child: Icon(Icons.volume_off, size: 14, color: AppColors.textMuted),
                         ),
                       Expanded(
                         child: Text(
                           _preview,
-                          style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
+                          style: const TextStyle(fontSize: 13, color: AppColors.textSecondary, height: 1.3),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
                       if (chat.unreadCount > 0)
                         Container(
-                          margin: const EdgeInsets.only(left: 6),
-                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                          margin: const EdgeInsets.only(left: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
                             color: chat.isMuted ? AppColors.textMuted : AppColors.primary,
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(14),
                           ),
                           child: Text(
                             chat.unreadCount > 99 ? '99+' : '${chat.unreadCount}',
-                            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
                           ),
                         ),
                     ],

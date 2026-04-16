@@ -125,6 +125,8 @@ class _ChannelsScreenState extends State<ChannelsScreen> with SingleTickerProvid
                           ),
                         )
                       : ListView.builder(
+                          padding: const EdgeInsets.only(bottom: 18),
+                          physics: const AlwaysScrollableScrollPhysics(),
                           itemCount: _myChannels.length,
                           itemBuilder: (_, i) => _ChannelTile(channel: _myChannels[i], onTap: () => _openChannel(_myChannels[i])),
                         ),
@@ -133,14 +135,17 @@ class _ChannelsScreenState extends State<ChannelsScreen> with SingleTickerProvid
           Column(
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
                 child: TextField(
                   onChanged: _onSearch,
                   style: const TextStyle(color: AppColors.textPrimary),
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
+                    filled: true,
+                    fillColor: AppColors.bg4,
                     hintText: 'Поиск каналов...',
-                    fillColor: AppColors.bg3,
-                    prefixIcon: Icon(Icons.search, color: AppColors.textMuted, size: 20),
+                    prefixIcon: const Icon(Icons.search, color: AppColors.textMuted, size: 20),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: BorderSide.none),
                   ),
                 ),
               ),
@@ -150,12 +155,19 @@ class _ChannelsScreenState extends State<ChannelsScreen> with SingleTickerProvid
                     : _exploreChannels.isEmpty
                         ? const Center(child: Text('Каналы не найдены', style: TextStyle(color: AppColors.textMuted)))
                         : ListView.builder(
+                            padding: const EdgeInsets.only(bottom: 18),
+                            physics: const AlwaysScrollableScrollPhysics(),
                             itemCount: _exploreChannels.length,
-                            itemBuilder: (_, i) => _ChannelTile(channel: _exploreChannels[i], onTap: () => _openChannel(_exploreChannels[i]), showSubscribe: true, onSubscribe: () async {
-                              await ApiService.subscribeChannel(_exploreChannels[i].id);
-                              _loadExplore(_search);
-                              _loadMy();
-                            }),
+                            itemBuilder: (_, i) => _ChannelTile(
+                              channel: _exploreChannels[i],
+                              onTap: () => _openChannel(_exploreChannels[i]),
+                              showSubscribe: true,
+                              onSubscribe: () async {
+                                await ApiService.subscribeChannel(_exploreChannels[i].id);
+                                _loadExplore(_search);
+                                _loadMy();
+                              },
+                            ),
                           ),
               ),
             ],
@@ -175,56 +187,84 @@ class _ChannelTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
+    return GestureDetector(
       onTap: onTap,
-      leading: AppAvatar(name: channel.name, url: channel.avatarUrl, size: 48),
-      title: Row(
-        children: [
-          Expanded(child: Text(channel.name, style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis)),
-          if (channel.isOwner) Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.15), borderRadius: BorderRadius.circular(8)),
-            child: const Text('Мой', style: TextStyle(color: AppColors.primary, fontSize: 10, fontWeight: FontWeight.w600)),
-          ),
-          if (channel.monthlyPrice > 0) Container(
-            margin: const EdgeInsets.only(left: 4),
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(color: AppColors.yellow.withOpacity(0.15), borderRadius: BorderRadius.circular(8)),
-            child: Text('₽${channel.monthlyPrice.toStringAsFixed(0)}/мес', style: const TextStyle(color: AppColors.yellow, fontSize: 10, fontWeight: FontWeight.w600)),
-          ),
-        ],
-      ),
-      subtitle: Row(
-        children: [
-          Icon(Icons.people, size: 12, color: AppColors.textMuted.withOpacity(0.7)),
-          const SizedBox(width: 4),
-          Text('${channel.subscriberCount}', style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
-          if (channel.lastPost != null) ...[
-            const Text('  ·  ', style: TextStyle(color: AppColors.textMuted)),
-            Expanded(child: Text(channel.lastPost!, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis)),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          color: AppColors.bg3,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: AppColors.divider),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 12, offset: const Offset(0, 4)),
           ],
-        ],
-      ),
-      trailing: showSubscribe && !channel.isOwner
-          ? GestureDetector(
-              onTap: onSubscribe,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: channel.isSubscribed ? AppColors.bg4 : AppColors.primary,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Text(
-                  channel.isSubscribed ? 'Подписан' : 'Подписаться',
-                  style: TextStyle(
-                    color: channel.isSubscribed ? AppColors.textSecondary : Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
+        ),
+        child: Row(
+          children: [
+            AppAvatar(name: channel.name, url: channel.avatarUrl, size: 48),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(child: Text(channel.name, style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w700), overflow: TextOverflow.ellipsis)),
+                      if (channel.isOwner)
+                        Container(
+                          margin: const EdgeInsets.only(left: 6),
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.15), borderRadius: BorderRadius.circular(8)),
+                          child: const Text('Мой', style: TextStyle(color: AppColors.primary, fontSize: 10, fontWeight: FontWeight.w600)),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Icon(Icons.people, size: 12, color: AppColors.textMuted.withOpacity(0.7)),
+                      const SizedBox(width: 6),
+                      Text('${channel.subscriberCount}', style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                      if (channel.monthlyPrice > 0) ...[
+                        const SizedBox(width: 10),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(color: AppColors.yellow.withOpacity(0.16), borderRadius: BorderRadius.circular(8)),
+                          child: Text('₽${channel.monthlyPrice.toStringAsFixed(0)}/мес', style: const TextStyle(color: AppColors.yellow, fontSize: 10, fontWeight: FontWeight.w600)),
+                        ),
+                      ],
+                    ],
+                  ),
+                  if (channel.lastPost != null) ...[
+                    const SizedBox(height: 8),
+                    Text(channel.lastPost!, style: const TextStyle(color: AppColors.textSecondary, fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ],
+                ],
+              ),
+            ),
+            if (showSubscribe && !channel.isOwner)
+              GestureDetector(
+                onTap: onSubscribe,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: channel.isSubscribed ? AppColors.bg4 : AppColors.primary,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Text(
+                    channel.isSubscribed ? 'Подписан' : 'Подписаться',
+                    style: TextStyle(
+                      color: channel.isSubscribed ? AppColors.textSecondary : Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ),
-            )
-          : null,
+          ],
+        ),
+      ),
     );
   }
 }

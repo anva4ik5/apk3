@@ -27,7 +27,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final _ctrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   final List<Message> _messages = [];
-  final _record = AudioRecorder();
+  final _record = Record();
   Chat? _chat;
   User? _me;
   bool _loading = true;
@@ -40,18 +40,26 @@ class _ChatScreenState extends State<ChatScreen> {
   Message? _replyTo;
   Message? _editingMessage;
   bool _showEmojiPicker = false;
+  bool _searchMode = false;
+  bool _searchLoading = false;
+  String _searchQuery = '';
+  List<Message> _searchResults = [];
+  Timer? _searchDebounce;
 
   @override
   void initState() {
     super.initState();
     _init();
     _scrollCtrl.addListener(_onScroll);
+    _ctrl.addListener(_onTextChanged);
   }
 
   @override
   void dispose() {
     wsService.leaveChat(widget.chatId);
     _wsSub?.cancel();
+    _searchDebounce?.cancel();
+    _ctrl.removeListener(_onTextChanged);
     _ctrl.dispose();
     _scrollCtrl.dispose();
     _typingTimer?.cancel();
@@ -59,11 +67,15 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
+  void _onTextChanged() {
+    if (mounted) setState(() {});
+  }
+
   Future<void> _startRecording() async {
     try {
       if (await _record.hasPermission()) {
         final path = '${Directory.systemTemp.path}/audio_${DateTime.now().millisecondsSinceEpoch}.m4a';
-        await _record.start(const RecordConfig(encoder: AudioEncoder.aacLc), path: path);
+        await _record.start(path: path, encoder: AudioEncoder.aacLc);
         setState(() => _isRecording = true);
       }
     } catch (e) {
@@ -283,6 +295,149 @@ class _ChatScreenState extends State<ChatScreen> {
         });
       }
     });
+  }
+
+  void _toggleSearchMode() {
+    _searchDebounce?.cancel();
+    setState(() {
+      _searchMode = !_searchMode;
+      _searchQuery = '';
+      _searchResults = [];
+      _searchLoading = false;
+    });
+  }
+
+  void _onSearchChanged(String value) {
+    _searchDebounce?.cancel();
+    setState(() {
+      _searchQuery = value;
+      _searchLoading = value.trim().isNotEmpty;
+    });
+    if (value.trim().isEmpty) {
+      setState(() {
+        _searchResults = [];
+        _searchLoading = false;
+      });
+      return;
+    }
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () => _searchMessages(value.trim()));
+  }
+
+  Future<void> _searchMessages(String query) async {
+    setState(() => _searchLoading = true);
+    try {
+      final results = await ApiService.searchMessages(widget.chatId, query);
+      if (!mounted) return;
+      setState(() {
+        _searchResults = results.map((j) => Message.fromJson(j as Map<String, dynamic>)).toList();
+        _searchLoading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _searchLoading = false);
+    }
+  }
+
+  String _formatTimeShort(DateTime dt) {
+    final local = dt.toLocal();
+    return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+  }
+
+  void _showSharedMedia() {
+    final attachments = _messages.where((m) => m.type != 'text' || (m.mediaUrl != null && m.mediaUrl!.isNotEmpty)).toList();
+    if (attachments.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('В чате нет медиа'), backgroundColor: AppColors.bg3, behavior: SnackBarBehavior.floating),
+      );
+      return;
+    }
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.bg2,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Container(width: 36, height: 4, decoration: BoxDecoration(color: AppColors.textMuted.withOpacity(0.4), borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 14),
+            const Text('Медиа чата', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+            const SizedBox(height: 10),
+            Expanded(
+              child: ListView.builder(
+                itemCount: attachments.length,
+                itemBuilder: (_, i) {
+                  final msg = attachments[i];
+                  final title = msg.type == 'image'
+                      ? 'Изображение'
+                      : msg.type == 'voice'
+                          ? 'Голосовое сообщение'
+                          : msg.type == 'file'
+                              ? 'Файл'
+                              : 'Медиа';
+                  return ListTile(
+                    leading: msg.type == 'image' && msg.mediaUrl != null
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Image.network(msg.mediaUrl!, width: 56, height: 56, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.image, color: AppColors.primary)),
+                          )
+                        : Container(
+                            width: 56,
+                            height: 56,
+                            decoration: BoxDecoration(color: AppColors.bg3, borderRadius: BorderRadius.circular(14)),
+                            child: Icon(msg.type == 'voice' ? Icons.mic : Icons.insert_drive_file, color: AppColors.primary, size: 28),
+                          ),
+                    title: Text(title, style: const TextStyle(color: AppColors.textPrimary)),
+                    subtitle: Text(_formatTimeShort(msg.createdAt), style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+                    onTap: () {},
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+      isScrollControlled: true,
+    );
+  }
+
+  Widget _buildSearchResults() {
+    if (_searchLoading) {
+      return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+    }
+    if (_searchResults.isEmpty) {
+      return Center(
+        child: Text(
+          _searchQuery.isEmpty ? 'Введите запрос для поиска' : 'Сообщения не найдены',
+          style: const TextStyle(color: AppColors.textMuted),
+        ),
+      );
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+      itemCount: _searchResults.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      itemBuilder: (_, i) {
+        final msg = _searchResults[i];
+        return Material(
+          color: AppColors.bg3,
+          borderRadius: BorderRadius.circular(20),
+          child: ListTile(
+            onTap: () {
+              _toggleSearchMode();
+              WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+            },
+            title: Text(
+              msg.senderName,
+              style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600),
+            ),
+            subtitle: Text(msg.content, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppColors.textSecondary)),
+            trailing: Text(_formatTimeShort(msg.createdAt), style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _send() async {
@@ -539,46 +694,67 @@ class _ChatScreenState extends State<ChatScreen> {
         leading: const BackButton(),
         title: _chat == null
             ? const SizedBox.shrink()
-            : InkWell(
-                onTap: () {
-                  if (_chat!.type == 'group') {
-                    _showGroupInfo();
-                  } else if (_chat!.otherUserId != null) {
-                    _showUserProfile(_chat!.otherUserId!);
-                  }
-                },
-                child: Row(
-                  children: [
-                    AppAvatar(
-                      name: _chat!.displayName,
-                      url: _chat!.displayAvatar,
-                      size: 38,
-                      showOnline: !isGroup,
-                      isOnline: _chat?.otherUserOnline ?? false,
+            : _searchMode
+                ? TextField(
+                    autofocus: true,
+                    onChanged: _onSearchChanged,
+                    style: const TextStyle(color: AppColors.textPrimary, fontSize: 15),
+                    decoration: const InputDecoration(
+                      hintText: 'Поиск сообщений...',
+                      hintStyle: TextStyle(color: AppColors.textMuted),
+                      border: InputBorder.none,
                     ),
-                    const SizedBox(width: 10),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                  )
+                : InkWell(
+                    onTap: () {
+                      if (_chat!.type == 'group') {
+                        _showGroupInfo();
+                      } else if (_chat!.otherUserId != null) {
+                        _showUserProfile(_chat!.otherUserId!);
+                      }
+                    },
+                    child: Row(
                       children: [
-                        Text(_chat!.displayName, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                        if (_typing != null)
-                          Text('$_typing печатает...', style: const TextStyle(color: AppColors.primary, fontSize: 12))
-                        else if (!isGroup)
-                          Text(
-                            (_chat?.otherUserOnline ?? false) ? 'В сети' : 'Не в сети',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: (_chat?.otherUserOnline ?? false) ? AppColors.green : AppColors.textMuted,
-                            ),
-                          )
-                        else
-                          const Text('Группа', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                        AppAvatar(
+                          name: _chat!.displayName,
+                          url: _chat!.displayAvatar,
+                          size: 38,
+                          showOnline: !isGroup,
+                          isOnline: _chat?.otherUserOnline ?? false,
+                        ),
+                        const SizedBox(width: 10),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(_chat!.displayName, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                            if (_typing != null)
+                              Text('$_typing печатает...', style: const TextStyle(color: AppColors.primary, fontSize: 12))
+                            else if (!isGroup)
+                              Text(
+                                (_chat?.otherUserOnline ?? false) ? 'В сети' : 'Не в сети',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: (_chat?.otherUserOnline ?? false) ? AppColors.green : AppColors.textMuted,
+                                ),
+                              )
+                            else
+                              const Text('Группа', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                          ],
+                        ),
                       ],
                     ),
-                  ],
-                ),
-              ),
+                  ),
         actions: [
+          IconButton(
+            icon: Icon(_searchMode ? Icons.close : Icons.search, color: AppColors.primary),
+            onPressed: _toggleSearchMode,
+            tooltip: _searchMode ? 'Закрыть поиск' : 'Поиск сообщений',
+          ),
+          IconButton(
+            icon: const Icon(Icons.perm_media_outlined, color: AppColors.primary),
+            onPressed: _showSharedMedia,
+            tooltip: 'Медиа',
+          ),
           PopupMenuButton<String>(
             color: AppColors.bg3,
             icon: const Icon(Icons.more_vert, color: AppColors.primary),
@@ -617,28 +793,30 @@ class _ChatScreenState extends State<ChatScreen> {
             _PinnedBanner(message: _messages.lastWhere((m) => m.isPinned)),
           // Messages
           Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
-                : ListView.builder(
-                    controller: _scrollCtrl,
-                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
-                    itemCount: _messages.length + (_loadingMore ? 1 : 0),
-                    itemBuilder: (_, i) {
-                      if (_loadingMore && i == 0) {
-                        return const Center(child: Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2)));
-                      }
-                      final idx = _loadingMore ? i - 1 : i;
-                      final msg = _messages[idx];
-                      return _MessageBubble(
-                        message: msg,
-                        isOwn: msg.senderId == _me?.id,
-                        isGroup: isGroup,
-                        onLongPress: () => _showMessageOptions(msg),
-                        onReply: () => setState(() => _replyTo = msg),
-                        currentUserId: _me?.id ?? '',
-                      );
-                    },
-                  ),
+            child: _searchMode
+                ? _buildSearchResults()
+                : _loading
+                    ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+                    : ListView.builder(
+                        controller: _scrollCtrl,
+                        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                        itemCount: _messages.length + (_loadingMore ? 1 : 0),
+                        itemBuilder: (_, i) {
+                          if (_loadingMore && i == 0) {
+                            return const Center(child: Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2)));
+                          }
+                          final idx = _loadingMore ? i - 1 : i;
+                          final msg = _messages[idx];
+                          return _MessageBubble(
+                            message: msg,
+                            isOwn: msg.senderId == _me?.id,
+                            isGroup: isGroup,
+                            onLongPress: () => _showMessageOptions(msg),
+                            onReply: () => setState(() => _replyTo = msg),
+                            currentUserId: _me?.id ?? '',
+                          );
+                        },
+                      ),
           ),
           // Reply / Edit bar
           if (_replyTo != null || _editingMessage != null)
@@ -776,20 +954,20 @@ class _Bubble extends StatelessWidget {
     final isForwarded = message.forwardFromUser != null;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         gradient: isOwn
             ? const LinearGradient(colors: [AppColors.myBubble, AppColors.myBubbleDark], begin: Alignment.topLeft, end: Alignment.bottomRight)
             : null,
-        color: isOwn ? null : (isAi ? AppColors.aiBubble : AppColors.otherBubble),
+        color: isOwn ? null : (isAi ? AppColors.aiBubble : AppColors.bg3),
         borderRadius: BorderRadius.only(
-          topLeft: const Radius.circular(16),
-          topRight: const Radius.circular(16),
-          bottomLeft: Radius.circular(isOwn ? 16 : 4),
-          bottomRight: Radius.circular(isOwn ? 4 : 16),
+          topLeft: const Radius.circular(20),
+          topRight: const Radius.circular(20),
+          bottomLeft: Radius.circular(isOwn ? 20 : 6),
+          bottomRight: Radius.circular(isOwn ? 6 : 20),
         ),
         border: isAi ? Border.all(color: AppColors.aiAccent.withOpacity(0.3), width: 1) : null,
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 4, offset: const Offset(0, 2))],
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 6, offset: const Offset(0, 3))],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -959,20 +1137,26 @@ class _VoiceBubbleState extends State<_VoiceBubble> {
           IconButton(
             icon: Icon(isPlaying ? Icons.pause : Icons.play_arrow, color: widget.isOwn ? Colors.white : AppColors.primary),
             onPressed: () async {
+              if (widget.message.mediaUrl == null || widget.message.mediaUrl!.isEmpty) return;
               if (isPlaying) {
                 await player.pause();
               } else {
-                await player.play(UrlSource('${ApiService.baseUrl}${widget.message.mediaUrl}'));
+                final url = widget.message.mediaUrl!.startsWith('http')
+                    ? widget.message.mediaUrl!
+                    : '${ApiService.baseUrl}${widget.message.mediaUrl!}';
+                await player.play(UrlSource(url));
               }
             },
           ),
           Expanded(
             child: Slider(
-              value: position.inSeconds.toDouble(),
-              max: duration.inSeconds.toDouble(),
-              onChanged: (v) async {
-                await player.seek(Duration(seconds: v.toInt()));
-              },
+              value: duration.inSeconds > 0 ? position.inSeconds.toDouble().clamp(0.0, duration.inSeconds.toDouble()) : 0.0,
+              max: duration.inSeconds > 0 ? duration.inSeconds.toDouble() : 1.0,
+              onChanged: duration.inSeconds > 0
+                  ? (v) async {
+                      await player.seek(Duration(seconds: v.toInt()));
+                    }
+                  : null,
               activeColor: widget.isOwn ? Colors.white : AppColors.primary,
               inactiveColor: widget.isOwn ? Colors.white38 : AppColors.textMuted,
             ),
@@ -1074,10 +1258,11 @@ class _InputBar extends StatelessWidget {
               minLines: 1,
               textCapitalization: TextCapitalization.sentences,
               decoration: const InputDecoration(
+                filled: true,
+                fillColor: AppColors.bg4,
                 hintText: 'Сообщение...',
-                fillColor: AppColors.bg3,
-                border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(22)), borderSide: BorderSide.none),
-                contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(24)), borderSide: BorderSide.none),
+                contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               ),
               onChanged: onTyping,
               onSubmitted: (_) => onSend(),

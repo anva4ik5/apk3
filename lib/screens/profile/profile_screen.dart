@@ -245,33 +245,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   padding: const EdgeInsets.all(20),
                   child: Column(
                     children: [
-                      GestureDetector(
-                        onTap: _saving ? null : _uploadAvatar,
-                        child: Stack(
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
+                        decoration: BoxDecoration(
+                          color: AppColors.bg3,
+                          borderRadius: BorderRadius.circular(24),
+                          border: Border.all(color: AppColors.divider),                            boxShadow: [
+                              BoxShadow(color: Colors.black.withOpacity(0.16), blurRadius: 20, offset: const Offset(0, 8)),
+                            ],                        ),
+                        child: Column(
                           children: [
-                            AppAvatar(name: _user!.displayName, url: _user!.avatarUrl, size: 90),
-                            Positioned(
-                              right: 0,
-                              bottom: 0,
-                              child: Container(
-                                width: 30,
-                                height: 30,
-                                decoration: BoxDecoration(
-                                  color: AppColors.primary,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: AppColors.bg1, width: 2),
-                                ),
-                                child: _saving
-                                    ? const Padding(padding: EdgeInsets.all(6), child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                                    : const Icon(Icons.camera_alt, size: 16, color: Colors.white),
+                            GestureDetector(
+                              onTap: _saving ? null : _uploadAvatar,
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  AppAvatar(name: _user!.displayName, url: _user!.avatarUrl, size: 90),
+                                  Positioned(
+                                    right: 0,
+                                    bottom: 0,
+                                    child: Container(
+                                      width: 30,
+                                      height: 30,
+                                      decoration: BoxDecoration(
+                                        color: AppColors.primary,
+                                        shape: BoxShape.circle,
+                                        border: Border.all(color: AppColors.bg1, width: 2),
+                                      ),
+                                      child: _saving
+                                          ? const Padding(padding: EdgeInsets.all(6), child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                          : const Icon(Icons.camera_alt, size: 16, color: Colors.white),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      if (!_editing) ...[
+                            const SizedBox(height: 16),
+                            if (!_editing) ...[
                         Text(_user!.displayName, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
                         const SizedBox(height: 4),
                         Text('@${_user!.username}', style: const TextStyle(color: AppColors.primary, fontSize: 14)),
@@ -306,39 +317,52 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ],
                       const SizedBox(height: 24),
 
-                      if (!_editing) ...[
-                        _InfoTile(icon: Icons.email_outlined, label: 'Email', value: _user!.email, onTap: () => Clipboard.setData(ClipboardData(text: _user!.email))),
-                        _InfoTile(icon: Icons.phone_outlined, label: 'Телефон', value: _user!.phone ?? 'Не указан', onTap: _user!.phone != null ? () => Clipboard.setData(ClipboardData(text: _user!.phone!)) : null),
-                        _InfoTile(icon: Icons.alternate_email, label: 'Username', value: '@${_user!.username}', onTap: () => Clipboard.setData(ClipboardData(text: _user!.username))),
-                        if (_user!.statusText != null && _user!.statusText!.isNotEmpty)
-                          _InfoTile(icon: Icons.mood, label: 'Статус', value: _user!.statusText!),
-                        const SizedBox(height: 16),
-                      ],
-
-                      const Divider(),
-                      ListTile(
-                        leading: const Icon(Icons.security_outlined, color: AppColors.primary),
-                        title: const Text('Безопасность', style: TextStyle(color: AppColors.textPrimary)),
-                        trailing: const Icon(Icons.chevron_right, color: AppColors.textMuted),
-                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen(initialSection: 'security'))),
-                      ),
-                      ListTile(
-                        leading: const Icon(Icons.notifications_outlined, color: AppColors.primary),
-                        title: const Text('Уведомления', style: TextStyle(color: AppColors.textPrimary)),
-                        trailing: const Icon(Icons.chevron_right, color: AppColors.textMuted),
-                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen(initialSection: 'notifications'))),
-                      ),
-                      ListTile(
-                        leading: const Icon(Icons.palette_outlined, color: AppColors.primary),
-                        title: const Text('Оформление', style: TextStyle(color: AppColors.textPrimary)),
-                        trailing: const Icon(Icons.chevron_right, color: AppColors.textMuted),
-                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen(initialSection: 'appearance'))),
-                      ),
-                      const Divider(),
-                      ListTile(
-                        leading: const Icon(Icons.logout_rounded, color: AppColors.red),
-                        title: const Text('Выйти', style: TextStyle(color: AppColors.red)),
-                        onTap: _logout,
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                        decoration: BoxDecoration(
+                          color: AppColors.bg2,
+                          borderRadius: BorderRadius.circular(24),
+                          border: Border.all(color: AppColors.divider),                            boxShadow: [
+                              BoxShadow(color: Colors.black.withOpacity(0.14), blurRadius: 16, offset: const Offset(0, 6)),
+                            ],                        ),
+                        child: Column(
+                          children: [
+                            if (!_editing) ...[
+                              _InfoTile(icon: Icons.email_outlined, label: 'Email', value: _user!.email, onTap: () => Clipboard.setData(ClipboardData(text: _user!.email))),
+                              _InfoTile(icon: Icons.phone_outlined, label: 'Телефон', value: _user!.phone ?? 'Не указан', onTap: _user!.phone != null ? () => Clipboard.setData(ClipboardData(text: _user!.phone!)) : null),
+                              _InfoTile(icon: Icons.alternate_email, label: 'Username', value: '@${_user!.username}', onTap: () => Clipboard.setData(ClipboardData(text: _user!.username))),
+                              if (_user!.statusText != null && _user!.statusText!.isNotEmpty)
+                                _InfoTile(icon: Icons.mood, label: 'Статус', value: _user!.statusText!),
+                              const SizedBox(height: 16),
+                            ],
+                            const Divider(height: 1),
+                            ListTile(
+                              leading: const Icon(Icons.security_outlined, color: AppColors.primary),
+                              title: const Text('Безопасность', style: TextStyle(color: AppColors.textPrimary)),
+                              trailing: const Icon(Icons.chevron_right, color: AppColors.textMuted),
+                              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen(initialSection: 'security'))),
+                            ),
+                            ListTile(
+                              leading: const Icon(Icons.notifications_outlined, color: AppColors.primary),
+                              title: const Text('Уведомления', style: TextStyle(color: AppColors.textPrimary)),
+                              trailing: const Icon(Icons.chevron_right, color: AppColors.textMuted),
+                              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen(initialSection: 'notifications'))),
+                            ),
+                            ListTile(
+                              leading: const Icon(Icons.palette_outlined, color: AppColors.primary),
+                              title: const Text('Оформление', style: TextStyle(color: AppColors.textPrimary)),
+                              trailing: const Icon(Icons.chevron_right, color: AppColors.textMuted),
+                              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen(initialSection: 'appearance'))),
+                            ),
+                            const Divider(height: 1),
+                            ListTile(
+                              leading: const Icon(Icons.logout_rounded, color: AppColors.red),
+                              title: const Text('Выйти', style: TextStyle(color: AppColors.red)),
+                              onTap: _logout,
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -366,7 +390,13 @@ class _Field extends StatelessWidget {
           style: const TextStyle(color: AppColors.textPrimary),
           maxLines: maxLines,
           minLines: 1,
-          decoration: InputDecoration(hintText: hint ?? label),
+          decoration: InputDecoration(
+            hintText: hint ?? label,
+            filled: true,
+            fillColor: AppColors.bg4,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          ),
         ),
       ],
     );
@@ -382,12 +412,32 @@ class _InfoTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Icon(icon, color: AppColors.primary, size: 20),
-      title: Text(label, style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
-      subtitle: Text(value, style: const TextStyle(color: AppColors.textPrimary, fontSize: 14)),
-      onTap: onTap,
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: AppColors.bg2,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.divider),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: AppColors.primary, size: 20),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: const TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                const SizedBox(height: 4),
+                Text(value, style: const TextStyle(color: AppColors.textPrimary, fontSize: 14)),
+              ],
+            ),
+          ),
+          if (onTap != null)
+            Icon(Icons.copy, color: AppColors.textMuted, size: 18),
+        ],
+      ),
     );
   }
 }
