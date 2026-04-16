@@ -40,11 +40,12 @@ class _ChannelScreenState extends State<ChannelScreen> {
   }
 
   Future<void> _loadPosts() async {
+    setState(() { _loading = true; });
     try {
       final data = await ApiService.getChannelPosts(_channel.id);
       if (!mounted) return;
       setState(() { _posts = data; _loading = false; });
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _loading = false);
     }
   }
