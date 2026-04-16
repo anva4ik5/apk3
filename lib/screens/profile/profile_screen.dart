@@ -135,13 +135,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (!mounted) return;
       setState(() { _user = User.fromJson(data); _saving = false; });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Фото обновлено'), backgroundColor: AppColors.green, behavior: SnackBarBehavior.floating),
+        const SnackBar(content: Text('Фото обновлено ✓'), backgroundColor: AppColors.green, behavior: SnackBarBehavior.floating),
       );
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
+      String msg = e.toString();
+      if (msg.contains('404')) msg = 'Сервер не поддерживает загрузку фото (404). Обратитесь к разработчику.';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString()), backgroundColor: AppColors.red, behavior: SnackBarBehavior.floating),
+        SnackBar(content: Text(msg), backgroundColor: AppColors.red, behavior: SnackBarBehavior.floating),
       );
     }
   }
