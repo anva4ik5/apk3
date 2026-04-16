@@ -21,6 +21,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _loading = true;
   bool _editing = false;
   bool _saving = false;
+  String? _error;
   late TextEditingController _nameCtrl;
   late TextEditingController _bioCtrl;
   late TextEditingController _statusCtrl;
@@ -46,6 +47,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _load() async {
+    setState(() { _loading = true; _error = null; });
     try {
       final data = await ApiService.getMe();
       if (!mounted) return;
@@ -58,8 +60,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _phoneCtrl.text = user.phone ?? '';
         _loading = false;
       });
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+    } catch (e, stack) {
+      debugPrint('Profile load error: $e\n$stack');
+      if (mounted) setState(() { _loading = false; _error = e.toString(); });
     }
   }
 
@@ -100,7 +103,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     if (!mounted) return;
 
-    // Удалить фото
     if (source == null && _user?.avatarUrl != null) {
       setState(() => _saving = true);
       try {
@@ -213,13 +215,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
-          : _user == null
-              ? const Center(child: Text('Ошибка загрузки', style: TextStyle(color: AppColors.textSecondary)))
+          : _error != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.error_outline, color: AppColors.red, size: 48),
+                        const SizedBox(height: 12),
+                        Text(
+                          _error!,
+                          style: const TextStyle(color: AppColors.textSecondary, fontSize: 14),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 16),
+                        ElevatedButton.icon(
+                          onPressed: _load,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Повторить'),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
               : SingleChildScrollView(
                   padding: const EdgeInsets.all(20),
                   child: Column(
                     children: [
-                      // Avatar section
                       Stack(
                         children: [
                           AppAvatar(name: _user!.displayName, url: _user!.avatarUrl, size: 90),
@@ -282,7 +305,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ],
                       const SizedBox(height: 24),
 
-                      // Info tiles
                       if (!_editing) ...[
                         _InfoTile(icon: Icons.email_outlined, label: 'Email', value: _user!.email, onTap: () => Clipboard.setData(ClipboardData(text: _user!.email))),
                         _InfoTile(icon: Icons.phone_outlined, label: 'Телефон', value: _user!.phone ?? 'Не указан', onTap: _user!.phone != null ? () => Clipboard.setData(ClipboardData(text: _user!.phone!)) : null),
@@ -292,7 +314,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         const SizedBox(height: 16),
                       ],
 
-                      // Actions
                       const Divider(),
                       ListTile(
                         leading: const Icon(Icons.security_outlined, color: AppColors.primary),
