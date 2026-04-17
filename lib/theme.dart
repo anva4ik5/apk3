@@ -89,7 +89,7 @@ ThemeData buildTheme() {
       selectedLabelStyle: TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
       unselectedLabelStyle: TextStyle(fontSize: 11),
     ),
-    tabBarTheme: const TabBarTheme(
+    tabBarTheme: const TabBarThemeData(
       indicator: UnderlineTabIndicator(borderSide: BorderSide(color: AppColors.primary, width: 2)),
       labelColor: AppColors.primary,
       unselectedLabelColor: AppColors.textMuted,
@@ -128,7 +128,7 @@ ThemeData buildTheme() {
         textStyle: const TextStyle(fontWeight: FontWeight.w600),
       ),
     ),
-    cardTheme: const CardTheme(
+    cardTheme: const CardThemeData(
       color: AppColors.bg2,
       elevation: 0,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(18))),
