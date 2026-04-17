@@ -315,6 +315,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               : const Text('Сохранить'),
                         ),
                       ],
+                          ],
+                        ),
+                      ),
                       const SizedBox(height: 24),
 
                       Container(
